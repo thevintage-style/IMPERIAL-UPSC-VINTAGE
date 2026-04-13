@@ -1,6 +1,8 @@
 import React from 'react';
-import { User } from 'firebase/auth';
-import { auth, signOut } from '../lib/firebase';
+import { User as FirebaseUser } from 'firebase/auth';
+import { User as SupabaseUser } from '@supabase/supabase-js';
+import { auth, signOut as firebaseSignOut } from '../lib/firebase';
+import { supabase, signOut as supabaseSignOut } from '../lib/supabase';
 import { 
   LayoutDashboard, 
   Map as MapIcon, 
@@ -29,7 +31,7 @@ import { db, collection, onSnapshot, query, where, doc } from '../lib/firebase';
 import { cn } from '../lib/utils';
 
 interface LayoutProps {
-  user: User;
+  user: FirebaseUser | SupabaseUser;
   activeTab: string;
   setActiveTab: (tab: string) => void;
   children: React.ReactNode;
@@ -41,7 +43,9 @@ export function Layout({ user, activeTab, setActiveTab, children }: LayoutProps)
   const [userProfile, setUserProfile] = React.useState<any>(null);
 
   React.useEffect(() => {
-    const userRef = doc(db, 'users', user.uid);
+    const uid = (user as any).uid || (user as any).id;
+    if (!uid) return;
+    const userRef = doc(db, 'users', uid);
     const unsubscribe = onSnapshot(userRef, (doc) => {
       if (doc.exists()) {
         setUserProfile(doc.data());
@@ -50,7 +54,7 @@ export function Layout({ user, activeTab, setActiveTab, children }: LayoutProps)
       console.error("User Profile Listener Error:", error);
     });
     return () => unsubscribe();
-  }, [user.uid]);
+  }, [(user as any).uid || (user as any).id]);
 
   React.useEffect(() => {
     const q = query(collection(db, 'discountOffers'), where('isActive', '==', true));
@@ -153,7 +157,7 @@ export function Layout({ user, activeTab, setActiveTab, children }: LayoutProps)
           >
             <div className="relative">
               <img 
-                src={user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`} 
+                src={(user as any).photoURL || (user as any).user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${(user as any).uid || (user as any).id}`} 
                 alt="Profile" 
                 className="w-10 h-10 rounded-full border-2 border-[#5A5A40]/20"
                 referrerPolicy="no-referrer"
@@ -166,7 +170,7 @@ export function Layout({ user, activeTab, setActiveTab, children }: LayoutProps)
             </div>
             {isSidebarOpen && (
               <div className="flex flex-col overflow-hidden text-left">
-                <span className="text-sm font-bold truncate">{userProfile?.displayName || user.displayName}</span>
+                <span className="text-sm font-bold truncate">{userProfile?.displayName || (user as any).displayName || (user as any).user_metadata?.full_name}</span>
                 <span className="text-xs text-[#5A5A40]/60 truncate italic font-serif">
                   {userProfile?.avatarId ? userProfile.avatarId.split('-')[0].toUpperCase() : 'Aspirant'}
                 </span>
@@ -174,7 +178,13 @@ export function Layout({ user, activeTab, setActiveTab, children }: LayoutProps)
             )}
           </button>
           <button
-            onClick={() => signOut(auth)}
+            onClick={async () => {
+              if ((user as any).aud === 'authenticated') {
+                await supabaseSignOut();
+              } else {
+                await firebaseSignOut(auth);
+              }
+            }}
             className="w-full flex items-center gap-4 p-3 rounded-xl text-red-600 hover:bg-red-50 transition-colors"
           >
             <LogOut size={22} />

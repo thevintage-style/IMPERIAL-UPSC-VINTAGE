@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { auth, onSnapshot, doc, db, googleProvider, signInWithPopup, signOut, getDoc, setDoc, OperationType, handleFirestoreError } from './lib/firebase';
-import { User } from 'firebase/auth';
+import { auth, onSnapshot, doc, db, googleProvider, signInWithPopup, signOut as firebaseSignOut, getDoc, setDoc, OperationType, handleFirestoreError } from './lib/firebase';
+import { supabase, signInWithGoogle as supabaseSignIn } from './lib/supabase';
+import { User as FirebaseUser } from 'firebase/auth';
+import { User as SupabaseUser } from '@supabase/supabase-js';
 import { Layout } from './components/Layout';
 import { Dashboard } from './components/Dashboard';
 import { Oracle } from './components/Oracle';
@@ -26,64 +28,71 @@ import { Button } from './components/ui/button';
 import { LogIn, BookOpen } from 'lucide-react';
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<FirebaseUser | SupabaseUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [otpStep, setOtpStep] = useState(false);
   const [otp, setOtp] = useState('');
-  const [tempUser, setTempUser] = useState<User | null>(null);
+  const [tempUser, setTempUser] = useState<FirebaseUser | SupabaseUser | null>(null);
   const [loginLoading, setLoginLoading] = useState(false);
 
-  const isAdmin = user?.email === "raksha05jk.rao@gmail.com";
+  const isAdmin = (user as any)?.email === "raksha05jk.rao@gmail.com";
 
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged(async (u) => {
-      if (u) {
-        // Ensure user profile exists
-        const userRef = doc(db, `users/${u.uid}`);
-        try {
-          const userSnap = await getDoc(userRef);
-          if (!userSnap.exists()) {
-            await setDoc(userRef, {
-              uid: u.uid,
-              displayName: u.displayName,
-              email: u.email,
-              role: u.email === "raksha05jk.rao@gmail.com" ? 'admin' : 'user',
-              subscriptionStatus: 'free',
-              createdAt: new Date().toISOString(),
-              lastLoginAt: new Date().toISOString()
-            });
-          } else {
-            await setDoc(userRef, {
-              lastLoginAt: new Date().toISOString()
-            }, { merge: true });
+    // Listen to Supabase Auth
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session?.user) {
+        setUser(session.user);
+        setLoading(false);
+      } else {
+        // Fallback to Firebase if no Supabase session
+        const unsubscribeFirebase = auth.onAuthStateChanged(async (u) => {
+          if (u) {
+            // Ensure user profile exists
+            const userRef = doc(db, `users/${u.uid}`);
+            try {
+              const userSnap = await getDoc(userRef);
+              if (!userSnap.exists()) {
+                await setDoc(userRef, {
+                  uid: u.uid,
+                  displayName: u.displayName,
+                  email: u.email,
+                  role: u.email === "raksha05jk.rao@gmail.com" ? 'admin' : 'user',
+                  subscriptionStatus: 'free',
+                  createdAt: new Date().toISOString(),
+                  lastLoginAt: new Date().toISOString()
+                });
+              } else {
+                await setDoc(userRef, {
+                  lastLoginAt: new Date().toISOString()
+                }, { merge: true });
+              }
+            } catch (error) {
+              handleFirestoreError(error, OperationType.GET, `users/${u.uid}`);
+            }
           }
-        } catch (error) {
-          handleFirestoreError(error, OperationType.GET, `users/${u.uid}`);
-        }
+          if (!otpStep) {
+            setUser(u);
+          }
+          setLoading(false);
+        });
+        return () => unsubscribeFirebase();
       }
-      // If we are in OTP step, don't set user yet
-      if (!otpStep) {
-        setUser(u);
-      }
-      setLoading(false);
     });
-    return () => unsubscribe();
+
+    return () => subscription.unsubscribe();
   }, [otpStep]);
 
   const handleLogin = async () => {
     if (loginLoading) return;
     setLoginLoading(true);
+    console.log("Initiating Imperial Reconnaissance via Supabase...");
     try {
-      const result = await signInWithPopup(auth, googleProvider);
-      setTempUser(result.user);
-      setOtpStep(true);
+      await supabaseSignIn();
+      // Redirect or state update is handled by onAuthStateChange
     } catch (error: any) {
-      if (error.code === 'auth/cancelled-popup-request') {
-        console.warn("Login popup request was cancelled by a subsequent request.");
-      } else {
-        console.error("Login failed", error);
-      }
+      console.error("Supabase Login Failed:", error);
+      alert(`The Imperial Guard blocked your entry: ${error.message || 'Unknown error'}`);
     } finally {
       setLoginLoading(false);
     }
@@ -158,24 +167,24 @@ export default function App() {
   }
 
   return (
-    <Layout user={user} activeTab={activeTab} setActiveTab={setActiveTab}>
-      {activeTab === 'dashboard' && <VedicDashboard user={user} setActiveTab={setActiveTab} />}
+    <Layout user={user as any} activeTab={activeTab} setActiveTab={setActiveTab}>
+      {activeTab === 'dashboard' && <VedicDashboard user={user as any} setActiveTab={setActiveTab} />}
       {activeTab === 'syllabus' && <Syllabus />}
-      {activeTab === 'oracle' && <Oracle user={user} />}
-      {activeTab === 'cartographer' && <Cartographer user={user} />}
-      {activeTab === 'folio' && <Folio user={user} />}
-      {activeTab === 'news' && <NewsDesk user={user} />}
-      {activeTab === 'archives' && <Library user={user} isAdmin={isAdmin} />}
-      {activeTab === 'vault' && <PersonalVault user={user} />}
-      {activeTab === 'subscription' && <Subscription user={user} />}
-      {activeTab === 'support' && <Support user={user} />}
-      {activeTab === 'profile' && <Profile user={user} />}
-      {activeTab === 'vizier-studio' && <VizierStudio user={user} />}
-      {activeTab === 'community' && <Community user={user} isAdmin={isAdmin} />}
-      {activeTab === 'peer-chat' && <PeerChat user={user} />}
-      {activeTab === 'resources' && <ResourceFeed user={user} isAdmin={isAdmin} />}
-      {activeTab === 'rules' && isAdmin && <RulesAndRegulations user={user} />}
-      {activeTab === 'owner-settings' && isAdmin && <OwnerSettings user={user} />}
+      {activeTab === 'oracle' && <Oracle user={user as any} />}
+      {activeTab === 'cartographer' && <Cartographer user={user as any} />}
+      {activeTab === 'folio' && <Folio user={user as any} />}
+      {activeTab === 'news' && <NewsDesk user={user as any} />}
+      {activeTab === 'archives' && <Library user={user as any} isAdmin={isAdmin} />}
+      {activeTab === 'vault' && <PersonalVault user={user as any} />}
+      {activeTab === 'subscription' && <Subscription user={user as any} />}
+      {activeTab === 'support' && <Support user={user as any} />}
+      {activeTab === 'profile' && <Profile user={user as any} />}
+      {activeTab === 'vizier-studio' && <VizierStudio user={user as any} />}
+      {activeTab === 'community' && <Community user={user as any} isAdmin={isAdmin} />}
+      {activeTab === 'peer-chat' && <PeerChat user={user as any} />}
+      {activeTab === 'resources' && <ResourceFeed user={user as any} isAdmin={isAdmin} />}
+      {activeTab === 'rules' && isAdmin && <RulesAndRegulations user={user as any} />}
+      {activeTab === 'owner-settings' && isAdmin && <OwnerSettings user={user as any} />}
       
       <SocialSidebar />
     </Layout>
