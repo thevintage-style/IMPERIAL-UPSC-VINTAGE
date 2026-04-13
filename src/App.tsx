@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { auth, onSnapshot, doc, db, googleProvider, signInWithPopup, signOut as firebaseSignOut, getDoc, setDoc, OperationType, handleFirestoreError } from './lib/firebase';
-import { supabase, signInWithGoogle as supabaseSignIn, signInWithEmail, signUpWithEmail, isConfigured as isSupabaseConfigured } from './lib/supabase';
+import { supabase, signInWithEmail, signUpWithEmail, isConfigured as isSupabaseConfigured } from './lib/supabase';
 import { User as FirebaseUser } from 'firebase/auth';
 import { User as SupabaseUser } from '@supabase/supabase-js';
 import { Layout } from './components/Layout';
@@ -51,20 +51,27 @@ export default function App() {
         if (u) {
           const uid = u.uid;
           try {
-            // Sync Firebase user to Firestore via API to ensure it works even if rules are tight
-            await fetch(`/api/profile/${uid}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                uid,
-                displayName: u.displayName,
-                email: u.email,
-                role: u.email === "raksha05jk.rao@gmail.com" ? 'admin' : 'user',
-                subscriptionStatus: 'free',
-                createdAt: new Date().toISOString(),
-                lastLoginAt: new Date().toISOString()
-              })
-            });
+            // Sync Firebase user to Firestore client-side
+            const { doc, setDoc } = await import('firebase/firestore');
+            const userRef = doc(db, 'users', uid);
+            const publicRef = doc(db, 'publicProfiles', uid);
+            const userData = {
+              uid,
+              displayName: u.displayName,
+              email: u.email,
+              role: u.email === "raksha05jk.rao@gmail.com" ? 'admin' : 'user',
+              subscriptionStatus: 'free',
+              lastLoginAt: new Date().toISOString()
+            };
+            await setDoc(userRef, userData, { merge: true });
+            await setDoc(publicRef, {
+              uid,
+              displayName: u.displayName,
+              photoURL: u.photoURL,
+              role: userData.role,
+              lastLoginAt: userData.lastLoginAt
+            }, { merge: true });
+            console.log("Firebase Profile Sync: Success");
           } catch (error) {
             console.error("Firebase Sync Error:", error);
           }
@@ -105,13 +112,21 @@ export default function App() {
               // Sync user to Firestore client-side now that we have a Firebase session
               try {
                 const userRef = doc(db, 'users', sUser.id);
-                await setDoc(userRef, {
+                const publicRef = doc(db, 'publicProfiles', sUser.id);
+                const userData = {
                   uid: sUser.id,
                   displayName: sUser.user_metadata?.full_name || sUser.email?.split('@')[0],
                   email: sUser.email,
                   role: sUser.email === "raksha05jk.rao@gmail.com" ? 'admin' : 'user',
                   subscriptionStatus: 'free',
                   lastLoginAt: new Date().toISOString()
+                };
+                await setDoc(userRef, userData, { merge: true });
+                await setDoc(publicRef, {
+                  uid: sUser.id,
+                  displayName: userData.displayName,
+                  role: userData.role,
+                  lastLoginAt: userData.lastLoginAt
                 }, { merge: true });
                 console.log("Client-side Profile Sync: Success");
               } catch (syncError) {
@@ -202,7 +217,7 @@ export default function App() {
               />
             </div>
             <div className="text-left">
-              <label className="block text-xs font-serif font-bold text-[#5A5A40] uppercase tracking-widest mb-1 ml-1">Secret Key (Password)</label>
+              <label className="block text-xs font-serif font-bold text-[#5A5A40] uppercase tracking-widest mb-1 ml-1">Password</label>
               <input 
                 type="password"
                 value={password}
@@ -218,22 +233,16 @@ export default function App() {
               className="w-full bg-[#5A5A40] hover:bg-[#4A4A30] text-white rounded-full py-6 text-lg font-medium transition-all duration-300 shadow-md hover:shadow-lg disabled:opacity-50 mt-4"
             >
               <LogIn className="w-5 h-5 mr-2" />
-              {loginLoading ? "Preparing the Scrolls..." : (isSignUp ? "Join the Academy" : "Begin Your Reconnaissance")}
+              {loginLoading ? "Authenticating..." : (isSignUp ? "Sign Up" : "Begin")}
             </Button>
           </form>
 
-          <div className="mt-6 flex flex-col gap-2">
+          <div className="mt-6">
             <button 
               onClick={() => setIsSignUp(!isSignUp)}
               className="text-sm font-serif text-[#5A5A40] hover:text-[#8B4513] underline transition-colors"
             >
-              {isSignUp ? "Already have a scroll? Sign In" : "New to the Archives? Create Account"}
-            </button>
-            <button 
-              onClick={() => supabaseSignIn()}
-              className="text-xs font-serif text-[#5A5A40]/60 hover:text-[#5A5A40] transition-colors"
-            >
-              Or continue with Google
+              {isSignUp ? "Already have an account? Sign In" : "New here? Create an account"}
             </button>
           </div>
 

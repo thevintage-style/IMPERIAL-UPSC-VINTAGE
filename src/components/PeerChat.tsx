@@ -73,14 +73,14 @@ export function PeerChat({ user }: PeerChatProps) {
     });
 
     // Fetch all users
-    const unsubscribeUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
+    const unsubscribeUsers = onSnapshot(collection(db, 'publicProfiles'), (snapshot) => {
       const allUsers = snapshot.docs
         .map(doc => ({ uid: doc.id, ...doc.data() } as ChatUser))
         .filter(u => u.uid !== user.uid)
         .sort((a, b) => {
           if (a.role === 'admin') return -1;
           if (b.role === 'admin') return 1;
-          return a.displayName.localeCompare(b.displayName);
+          return (a.displayName || '').localeCompare(b.displayName || '');
         });
       setUsers(allUsers);
     });
@@ -175,8 +175,7 @@ export function PeerChat({ user }: PeerChatProps) {
 
   const filteredUsers = users.filter(u => 
     !blockedUserIds.includes(u.uid) &&
-    (u.displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    u.email.toLowerCase().includes(searchQuery.toLowerCase()))
+    (u.displayName || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (

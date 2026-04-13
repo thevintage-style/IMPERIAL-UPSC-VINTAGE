@@ -42,10 +42,16 @@ export function Profile({ user }: ProfileProps) {
     setMessage('');
     const uid = user.uid || (user as any).id;
     const path = `users/${uid}`;
+    const publicPath = `publicProfiles/${uid}`;
     try {
       await updateDoc(doc(db, 'users', uid), {
         displayName,
         studyGoal,
+        avatarId,
+        updatedAt: new Date().toISOString()
+      });
+      await updateDoc(doc(db, 'publicProfiles', uid), {
+        displayName,
         avatarId,
         updatedAt: new Date().toISOString()
       });

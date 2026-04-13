@@ -51,6 +51,30 @@ service cloud.firestore {
     // Collection: /users/{userId}/notes/{noteId}
     // Fields: userId, title, content, canvasData, createdAt
     //
+    // Collection: /publicProfiles/{userId}
+    // Fields: uid, displayName, role, photoURL, avatarId, lastLoginAt
+    //
+    // Collection: /reports/{id}
+    // Fields: reporterId, reportedId, reportedName, reason, details, context, status, createdAt
+    //
+    // Collection: /blockedUsers/{id}
+    // Fields: blockerId, blockedId, createdAt
+    //
+    // Collection: /chatRequests/{id}
+    // Fields: fromId, fromName, toId, status, createdAt
+    //
+    // Collection: /peerMessages/{id}
+    // Fields: text, senderId, receiverId, createdAt
+    //
+    // Collection: /communityMessages/{id}
+    // Fields: text, senderId, senderName, senderPhoto, isPinned, reactions, createdAt
+    //
+    // Collection: /resourcePosts/{id}
+    // Fields: title, description, authorId, authorName, url, type, createdAt
+    //
+    // Collection: /libraryResources/{id}
+    // Fields: title, category, type, url, description, createdAt
+    //
     // ===============================================================
 
     // ===============================================================
@@ -140,7 +164,7 @@ service cloud.firestore {
     // User Profiles
     match /users/{userId} {
       allow read: if isOwner(userId) || isAdmin();
-      allow create: if isAuthenticated() && request.resource.data.uid == request.auth.uid && request.resource.data.role == 'user';
+      allow create: if isAuthenticated() && request.resource.data.uid == request.auth.uid && (request.resource.data.role == 'user' || isAdmin());
       allow update: if (isOwner(userId) && request.resource.data.role == resource.data.role) || isAdmin();
 
       // Sub-collections
@@ -153,6 +177,57 @@ service cloud.firestore {
       match /notes/{noteId} {
         allow read, write: if isOwner(userId) || isAdmin();
       }
+    }
+
+    // Public Profiles
+    match /publicProfiles/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner(userId) || isAdmin();
+    }
+
+    // Reports
+    match /reports/{id} {
+      allow create: if isAuthenticated();
+      allow read, update, delete: if isAdmin();
+    }
+
+    // Blocked Users
+    match /blockedUsers/{id} {
+      allow read, write: if isAuthenticated() && (request.resource.data.blockerId == request.auth.uid || resource.data.blockerId == request.auth.uid);
+    }
+
+    // Chat Requests
+    match /chatRequests/{id} {
+      allow create: if isAuthenticated() && request.resource.data.fromId == request.auth.uid;
+      allow read, update: if isAuthenticated() && (resource.data.fromId == request.auth.uid || resource.data.toId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // Peer Messages
+    match /peerMessages/{id} {
+      allow create: if isAuthenticated() && request.resource.data.senderId == request.auth.uid;
+      allow read: if isAuthenticated() && (resource.data.senderId == request.auth.uid || resource.data.receiverId == request.auth.uid || isAdmin());
+    }
+
+    // Community Messages
+    match /communityMessages/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.senderId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
+    // Resource Posts
+    match /resourcePosts/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.authorId == request.auth.uid;
+      allow update: if isAuthenticated() && (resource.data.authorId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // Library Resources
+    match /libraryResources/{id} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
     }
   }
 }

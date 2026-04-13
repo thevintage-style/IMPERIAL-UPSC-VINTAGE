@@ -9,7 +9,7 @@ import crypto from "crypto";
 import Parser from "rss-parser";
 import { GoogleGenAI } from "@google/genai";
 import admin from "firebase-admin";
-import { getFirestore } from "firebase-admin/firestore";
+import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import fs from "fs";
 
 // Load Firebase Config
@@ -29,25 +29,27 @@ if (!admin.apps.length) {
     const sa = process.env.FIREBASE_SERVICE_ACCOUNT;
     const projectId = firebaseAppletConfig?.projectId || process.env.FIREBASE_PROJECT_ID || "imperial-upsc-portal";
     
+    console.log(`Attempting to initialize Firebase Admin for project: ${projectId}`);
+    
     if (sa && sa.trim().startsWith('{')) {
       const serviceAccount = JSON.parse(sa);
+      console.log(`Using Service Account for project: ${serviceAccount.project_id}`);
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
         projectId: serviceAccount.project_id || projectId
       });
     } else {
-      // Use default credentials (works in Cloud Run) but ensure correct project ID
+      console.log("Using default credentials (Cloud Run environment)");
       admin.initializeApp({
         projectId: projectId
       });
     }
-    console.log(`Firebase Admin initialized for project: ${projectId}`);
   } catch (error) {
     console.error("Firebase Admin initialization failed:", error);
   }
 }
 
-let db: admin.firestore.Firestore | null = null;
+let db: any = null;
 try {
   const dbId = firebaseAppletConfig?.firestoreDatabaseId;
   if (dbId && dbId !== "(default)") {
@@ -378,8 +380,8 @@ app.post("/api/user-data/:uid/:collection", async (req, res) => {
   try {
     const docRef = await db.collection("users").doc(uid).collection(collection).add({
       ...data,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp()
     });
     res.json({ id: docRef.id });
   } catch (error) {
@@ -396,7 +398,7 @@ app.put("/api/user-data/:uid/:collection/:id", async (req, res) => {
   try {
     await db.collection("users").doc(uid).collection(collection).doc(id).set({
       ...data,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      updatedAt: FieldValue.serverTimestamp()
     }, { merge: true });
     res.json({ status: "success" });
   } catch (error) {
