@@ -24,7 +24,9 @@ export function Dashboard({ user }: DashboardProps) {
   const [newLog, setNewLog] = useState({ subject: 'History', duration: 60 });
 
   useEffect(() => {
-    const path = `users/${user.uid}/studyLogs`;
+    const uid = user.uid || (user as any).id;
+    if (!uid) return;
+    const path = `users/${uid}/studyLogs`;
     const q = query(collection(db, path));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -33,14 +35,15 @@ export function Dashboard({ user }: DashboardProps) {
       handleFirestoreError(error, OperationType.GET, path);
     });
     return () => unsubscribe();
-  }, [user.uid]);
+  }, [user.uid, (user as any).id]);
 
   const addLog = async () => {
-    const path = `users/${user.uid}/studyLogs`;
+    const uid = user.uid || (user as any).id;
+    const path = `users/${uid}/studyLogs`;
     try {
       await addDoc(collection(db, path), {
         ...newLog,
-        userId: user.uid,
+        userId: uid,
         date: new Date().toISOString().split('T')[0],
         createdAt: serverTimestamp()
       });

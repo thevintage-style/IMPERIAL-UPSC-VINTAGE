@@ -19,26 +19,31 @@ export function Profile({ user }: ProfileProps) {
 
   useEffect(() => {
     const fetchProfile = async () => {
-      const docRef = doc(db, 'users', user.uid);
+      const uid = user.uid || (user as any).id;
+      if (!uid) return;
+      const docRef = doc(db, 'users', uid);
       try {
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
-          setStudyGoal(docSnap.data().studyGoal || '');
-          setAvatarId(docSnap.data().avatarId || '');
+          const data = docSnap.data();
+          setStudyGoal(data.studyGoal || '');
+          setAvatarId(data.avatarId || '');
+          setDisplayName(data.displayName || user.displayName || '');
         }
       } catch (error) {
         console.error("Error fetching profile:", error);
       }
     };
     fetchProfile();
-  }, [user.uid]);
+  }, [user.uid, (user as any).id]);
 
   const handleSave = async () => {
     setIsSaving(true);
     setMessage('');
-    const path = `users/${user.uid}`;
+    const uid = user.uid || (user as any).id;
+    const path = `users/${uid}`;
     try {
-      await updateDoc(doc(db, 'users', user.uid), {
+      await updateDoc(doc(db, 'users', uid), {
         displayName,
         studyGoal,
         avatarId,

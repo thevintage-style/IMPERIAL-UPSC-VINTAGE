@@ -57,7 +57,7 @@ export function Folio({ user }: FolioProps) {
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
   useEffect(() => {
-    const path = `users/${user.uid}/notes`;
+    const path = `users/${user.uid || (user as any).id}/notes`;
     const q = query(collection(db, path));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -66,7 +66,7 @@ export function Folio({ user }: FolioProps) {
       handleFirestoreError(error, OperationType.GET, path);
     });
     return () => unsubscribe();
-  }, [user.uid]);
+  }, [user.uid, (user as any).id]);
 
   useEffect(() => {
     if (activeNote) {
@@ -213,7 +213,8 @@ export function Folio({ user }: FolioProps) {
 
   const saveNote = async () => {
     if (!title) return;
-    const path = `users/${user.uid}/notes`;
+    const uid = user.uid || (user as any).id;
+    const path = `users/${uid}/notes`;
     const canvasData = JSON.stringify(strokes);
     
     try {
@@ -227,7 +228,7 @@ export function Folio({ user }: FolioProps) {
         const newDoc = await addDoc(collection(db, path), {
           title,
           canvasData,
-          userId: user.uid,
+          userId: uid,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         });
@@ -239,7 +240,8 @@ export function Folio({ user }: FolioProps) {
   };
 
   const deleteNote = async (id: string) => {
-    const path = `users/${user.uid}/notes`;
+    const uid = user.uid || (user as any).id;
+    const path = `users/${uid}/notes`;
     try {
       await deleteDoc(doc(db, path, id));
       if (activeNote?.id === id) setActiveNote(null);

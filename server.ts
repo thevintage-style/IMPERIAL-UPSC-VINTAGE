@@ -9,30 +9,62 @@ import crypto from "crypto";
 import Parser from "rss-parser";
 import { GoogleGenAI } from "@google/genai";
 import admin from "firebase-admin";
+import { getFirestore } from "firebase-admin/firestore";
+import fs from "fs";
+
+// Load Firebase Config
+let firebaseAppletConfig: any = null;
+try {
+  const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+  if (fs.existsSync(configPath)) {
+    firebaseAppletConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
+  }
+} catch (error) {
+  console.warn("Could not load firebase-applet-config.json");
+}
 
 // Initialize Firebase Admin
 if (!admin.apps.length) {
   try {
     const sa = process.env.FIREBASE_SERVICE_ACCOUNT;
+    const projectId = firebaseAppletConfig?.projectId || process.env.FIREBASE_PROJECT_ID || "imperial-upsc-portal";
+    
     if (sa && sa.trim().startsWith('{')) {
       const serviceAccount = JSON.parse(sa);
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
-        projectId: serviceAccount.project_id
+        projectId: serviceAccount.project_id || projectId
       });
     } else {
-      // Fallback: Use FIREBASE_SERVICE_ACCOUNT as project ID if it's a simple string, 
-      // or use FIREBASE_PROJECT_ID, or default.
+      // Use default credentials (works in Cloud Run) but ensure correct project ID
       admin.initializeApp({
-        projectId: sa || process.env.FIREBASE_PROJECT_ID || "imperial-upsc-portal"
+        projectId: projectId
       });
     }
+    console.log(`Firebase Admin initialized for project: ${projectId}`);
   } catch (error) {
-    console.warn("Firebase Admin initialization failed. Server-side DB writes might fail.", error);
+    console.error("Firebase Admin initialization failed:", error);
   }
 }
 
-const db = admin.apps.length ? admin.firestore() : null;
+let db: admin.firestore.Firestore | null = null;
+try {
+  const dbId = firebaseAppletConfig?.firestoreDatabaseId;
+  if (dbId && dbId !== "(default)") {
+    db = getFirestore(admin.app(), dbId);
+    console.log(`Using named Firestore database: ${dbId}`);
+  } else {
+    db = getFirestore(admin.app());
+    console.log("Using default Firestore database");
+  }
+} catch (error) {
+  console.error("Firestore initialization failed, trying default:", error);
+  try {
+    db = getFirestore(admin.app());
+  } catch (fallbackError) {
+    console.error("Critical: Firestore fallback failed:", fallbackError);
+  }
+}
 const parser = new Parser();
 const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
@@ -271,6 +303,120 @@ app.post("/api/system/provision-storage", (req, res) => {
       message: "Extra 50GB provisioned in the Imperial Cloud Vault." 
     });
   });
+
+// Firebase Custom Token for Supabase Users
+app.post("/api/auth/firebase-token", async (req, res) => {
+  const { uid, email, displayName } = req.body;
+  if (!uid) return res.status(400).json({ error: "UID is required" });
+
+  try {
+    const customToken = await admin.auth().createCustomToken(uid, {
+      email,
+      displayName
+    });
+    res.json({ token: customToken });
+  } catch (error) {
+    console.error("Error creating custom token:", error);
+    res.status(500).json({ error: "Failed to create custom token" });
+  }
+});
+
+// User Profile Proxy (Bypasses Firestore rules for Supabase users)
+app.get("/api/profile/:uid", async (req, res) => {
+  const { uid } = req.params;
+  if (!db) return res.status(500).json({ error: "Database not initialized" });
+  
+  try {
+    const userDoc = await db.collection("users").doc(uid).get();
+    if (!userDoc.exists) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    res.json(userDoc.data());
+  } catch (error) {
+    console.error("Error fetching profile:", error);
+    res.status(500).json({ error: "Failed to fetch profile" });
+  }
+});
+
+app.post("/api/profile/:uid", async (req, res) => {
+  const { uid } = req.params;
+  const data = req.body;
+  if (!db) return res.status(500).json({ error: "Database not initialized" });
+
+  try {
+    await db.collection("users").doc(uid).set({
+      ...data,
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+    res.json({ status: "success" });
+  } catch (error) {
+    console.error("Error updating profile:", error);
+    res.status(500).json({ error: "Failed to update profile" });
+  }
+});
+
+// Proxy for sub-collections
+app.get("/api/user-data/:uid/:collection", async (req, res) => {
+  const { uid, collection } = req.params;
+  if (!db) return res.status(500).json({ error: "Database not initialized" });
+
+  try {
+    const snapshot = await db.collection("users").doc(uid).collection(collection).get();
+    const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    res.json(items);
+  } catch (error) {
+    console.error(`Error fetching ${collection}:`, error);
+    res.status(500).json({ error: `Failed to fetch ${collection}` });
+  }
+});
+
+app.post("/api/user-data/:uid/:collection", async (req, res) => {
+  const { uid, collection } = req.params;
+  const data = req.body;
+  if (!db) return res.status(500).json({ error: "Database not initialized" });
+
+  try {
+    const docRef = await db.collection("users").doc(uid).collection(collection).add({
+      ...data,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+    res.json({ id: docRef.id });
+  } catch (error) {
+    console.error(`Error creating ${collection}:`, error);
+    res.status(500).json({ error: `Failed to create ${collection}` });
+  }
+});
+
+app.put("/api/user-data/:uid/:collection/:id", async (req, res) => {
+  const { uid, collection, id } = req.params;
+  const data = req.body;
+  if (!db) return res.status(500).json({ error: "Database not initialized" });
+
+  try {
+    await db.collection("users").doc(uid).collection(collection).doc(id).set({
+      ...data,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    res.json({ status: "success" });
+  } catch (error) {
+    console.error(`Error updating ${collection}:`, error);
+    res.status(500).json({ error: `Failed to update ${collection}` });
+  }
+});
+
+app.delete("/api/user-data/:uid/:collection/:id", async (req, res) => {
+  const { uid, collection, id } = req.params;
+  if (!db) return res.status(500).json({ error: "Database not initialized" });
+
+  try {
+    await db.collection("users").doc(uid).collection(collection).doc(id).delete();
+    res.json({ status: "success" });
+  } catch (error) {
+    console.error(`Error deleting ${collection}:`, error);
+    res.status(500).json({ error: `Failed to delete ${collection}` });
+  }
+});
 
 // Vite middleware for development
 if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
