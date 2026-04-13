@@ -1,0 +1,297 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Stores user-specific settings and progress.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "studyGoal": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "admin"] },
+        "subscriptionStatus": { "type": "string", "enum": ["free", "pro"] },
+        "subscriptionExpiry": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "lastLoginAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email"]
+    },
+    "AuditLog": {
+      "title": "Audit Log",
+      "description": "Tracks administrative actions for security.",
+      "type": "object",
+      "properties": {
+        "adminId": { "type": "string" },
+        "action": { "type": "string" },
+        "details": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["adminId", "action", "timestamp"]
+    },
+    "EngagementStats": {
+      "title": "Engagement Stats",
+      "description": "Aggregated daily engagement metrics.",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string", "format": "date" },
+        "activeUsers": { "type": "number" },
+        "newSubscriptions": { "type": "number" },
+        "revenue": { "type": "number" }
+      },
+      "required": ["date"]
+    },
+    "StudyLog": {
+      "title": "Study Log",
+      "description": "Records study sessions and hours.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "subject": { "type": "string" },
+        "duration": { "type": "number", "description": "Duration in minutes" },
+        "date": { "type": "string", "format": "date" },
+        "notes": { "type": "string" }
+      },
+      "required": ["userId", "subject", "duration", "date"]
+    },
+    "SyllabusProgress": {
+      "title": "Syllabus Progress",
+      "description": "Tracks progress on specific UPSC topics.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "topicId": { "type": "string" },
+        "status": { "type": "string", "enum": ["not-started", "in-progress", "completed"] },
+        "lastReviewed": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "topicId", "status"]
+    },
+    "Note": {
+      "title": "Note",
+      "description": "User notes, including text and canvas data.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "canvasData": { "type": "string", "description": "JSON string of canvas strokes" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title"]
+    },
+    "UpiId": {
+      "title": "UPI ID",
+      "description": "Stores UPI IDs for rotation.",
+      "type": "object",
+      "properties": {
+        "upiId": { "type": "string" },
+        "label": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "isPrimary": { "type": "boolean" },
+        "usageCount": { "type": "number" }
+      },
+      "required": ["upiId", "label"]
+    },
+    "SubscriptionPlan": {
+      "title": "Subscription Plan",
+      "description": "Dynamic subscription plans.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "duration": { "type": "string" },
+        "price": { "type": "number" },
+        "features": { "type": "array", "items": { "type": "string" } },
+        "isActive": { "type": "boolean" },
+        "highlight": { "type": "boolean" }
+      },
+      "required": ["name", "duration", "price"]
+    },
+    "Resource": {
+      "title": "Resource",
+      "description": "UPSC study materials (PDFs, Links).",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "category": { "type": "string", "enum": ["prelims", "mains", "interview", "current-affairs"] },
+        "type": { "type": "string", "enum": ["pdf", "video", "link"] },
+        "url": { "type": "string" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "category", "url"]
+    },
+    "NewsArticle": {
+      "title": "News Article",
+      "description": "AI-summarized current affairs from major news sources.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "source": { "type": "string", "enum": ["The Hindu", "Indian Express", "PIB"] },
+        "gsPaper": { "type": "string", "enum": ["GS I", "GS II", "GS III", "GS IV"] },
+        "summary": { "type": "string" },
+        "prelimsFacts": { "type": "array", "items": { "type": "string" } },
+        "mainsAnalysis": { "type": "string" },
+        "schemes": { "type": "array", "items": { "type": "string" } },
+        "url": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "source", "gsPaper", "summary"]
+    },
+    "Video": {
+      "title": "Video",
+      "description": "Educational videos and podcasts.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "url": { "type": "string" },
+        "type": { "type": "string", "enum": ["youtube", "community", "podcast"] },
+        "playlistId": { "type": "string" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "url", "type"]
+    },
+    "Playlist": {
+      "title": "Playlist",
+      "description": "Curated collections of videos or podcasts.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "type": { "type": "string", "enum": ["video", "podcast"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "type"]
+    },
+    "DiscountOffer": {
+      "title": "Discount Offer",
+      "description": "Promotional offers and discounts for students.",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "description": { "type": "string" },
+        "discountPercentage": { "type": "number" },
+        "expiryDate": { "type": "string", "format": "date-time" },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["code", "discountPercentage", "isActive"]
+    },
+    "SupportMessage": {
+      "title": "Support Message",
+      "description": "Messages for contact us and feedback.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "type": "string", "enum": ["feedback", "contact", "support"] },
+        "status": { "type": "string", "enum": ["new", "read", "replied"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "message", "type"]
+    },
+    "SupportChat": {
+      "title": "Support Chat",
+      "description": "Real-time support chat sessions.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "lastMessage": { "type": "string" },
+        "lastMessageAt": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["active", "closed"] }
+      },
+      "required": ["userId"]
+    },
+    "ChatMessage": {
+      "title": "Chat Message",
+      "description": "Individual messages within a support chat.",
+      "type": "object",
+      "properties": {
+        "chatId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderRole": { "type": "string", "enum": ["user", "admin", "ai"] },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["chatId", "senderId", "text"]
+    }
+  },
+  "firestore": {
+    "/settings/appConfig": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "upiId": { "type": "string" },
+          "proPrice": { "type": "number" },
+          "updatedAt": { "type": "string", "format": "date-time" },
+          "upiRotationCounter": { "type": "number" },
+          "activeUpiId": { "type": "string" },
+          "systemVersion": { "type": "string" },
+          "lastBuildStatus": { "type": "string" },
+          "storageUsed": { "type": "number" },
+          "storageLimit": { "type": "number" },
+          "announcement": { "type": "string" }
+        }
+      },
+      "description": "Global application settings managed by admin."
+    },
+    "/upiIds/{id}": {
+      "schema": "UpiId",
+      "description": "Collection of UPI IDs for rotation"
+    },
+    "/plans/{id}": {
+      "schema": "SubscriptionPlan",
+      "description": "Dynamic subscription plans"
+    },
+    "/resources/{id}": {
+      "schema": "Resource",
+      "description": "UPSC study materials"
+    },
+    "/newsArticles/{id}": {
+      "schema": "NewsArticle",
+      "description": "AI-summarized current affairs"
+    },
+    "/videos/{id}": {
+      "schema": "Video",
+      "description": "Educational videos and podcasts"
+    },
+    "/playlists/{id}": {
+      "schema": "Playlist",
+      "description": "Curated playlists"
+    },
+    "/discountOffers/{id}": {
+      "schema": "DiscountOffer",
+      "description": "Promotional offers"
+    },
+    "/supportMessages/{id}": {
+      "schema": "SupportMessage",
+      "description": "Feedback and contact messages"
+    },
+    "/supportChats/{chatId}": {
+      "schema": "SupportChat",
+      "description": "Support chat sessions"
+    },
+    "/supportChats/{chatId}/messages/{messageId}": {
+      "schema": "ChatMessage",
+      "description": "Messages in a support chat"
+    },
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile documents"
+    },
+    "/users/{userId}/studyLogs/{logId}": {
+      "schema": "StudyLog",
+      "description": "User study logs"
+    },
+    "/users/{userId}/syllabus/{topicId}": {
+      "schema": "SyllabusProgress",
+      "description": "User syllabus progress"
+    },
+    "/users/{userId}/notes/{noteId}": {
+      "schema": "Note",
+      "description": "User notes"
+    }
+  }
+}

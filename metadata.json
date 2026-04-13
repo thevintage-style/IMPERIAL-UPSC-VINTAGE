@@ -1,0 +1,7 @@
+{
+  "name": "Imperial Scholar: UPSC ",
+  "description": "A world-class study companion for UPSC aspirants with a vintage aesthetic, AI mentoring, and strategic mapping tools.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
