@@ -66,7 +66,7 @@ export function Folio({ user }: FolioProps) {
     setIsLoading(true);
     try {
       const { data, error } = await supabase
-        .from('log_entries')
+        .from('logs')
         .select('*')
         .eq('user_id', userId)
         .order('created_at', { ascending: false });
@@ -74,7 +74,7 @@ export function Folio({ user }: FolioProps) {
       if (error) throw error;
       setNotes(data || []);
     } catch (error) {
-      console.error("Error fetching log entries:", error);
+      console.error("Error fetching logs:", error);
     } finally {
       setIsLoading(false);
     }
@@ -84,8 +84,8 @@ export function Folio({ user }: FolioProps) {
     fetchNotes();
 
     const subscription = supabase
-      .channel('log_entries_changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'log_entries', filter: `user_id=eq.${userId}` }, fetchNotes)
+      .channel('logs_changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'logs', filter: `user_id=eq.${userId}` }, fetchNotes)
       .subscribe();
 
     return () => {
@@ -220,13 +220,13 @@ export function Folio({ user }: FolioProps) {
     try {
       if (activeNote) {
         const { error } = await supabase
-          .from('log_entries')
+          .from('logs')
           .update({ title, canvas_data: canvasData, ai_summary: aiSummary })
           .eq('id', activeNote.id);
         if (error) throw error;
       } else {
         const { data, error } = await supabase
-          .from('log_entries')
+          .from('logs')
           .insert([{ title, canvas_data: canvasData, ai_summary: aiSummary, user_id: userId }])
           .select()
           .single();
@@ -234,20 +234,20 @@ export function Folio({ user }: FolioProps) {
         setActiveNote(data);
       }
     } catch (error) {
-      console.error("Error saving log entry:", error);
+      console.error("Error saving log:", error);
     }
   };
 
-  const deleteNote = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this log entry?")) return;
-    try {
-      const { error } = await supabase.from('log_entries').delete().eq('id', id);
-      if (error) throw error;
-      if (activeNote?.id === id) setActiveNote(null);
-    } catch (error) {
-      console.error("Error deleting log entry:", error);
-    }
-  };
+const deleteNote = async (id: string) => {
+  if (!confirm("Are you sure you want to delete this log?")) return;
+  try {
+    const { error } = await supabase.from('logs').delete().eq('id', id);
+    if (error) throw error;
+    if (activeNote?.id === id) setActiveNote(null);
+  } catch (error) {
+    console.error("Error deleting log:", error);
+  }
+};
 
   const runAIOCR = async () => {
     const canvas = canvasRef.current;

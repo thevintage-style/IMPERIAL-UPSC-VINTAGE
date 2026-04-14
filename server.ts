@@ -104,84 +104,86 @@ const PORT = 3000;
 
 app.use(express.json());
 
+const syncNews = async () => {
+  const sources = [
+    { name: "The Hindu", url: "https://www.thehindu.com/news/national/feeder/default.rss" },
+    { name: "Indian Express", url: "https://indianexpress.com/section/explained/feed/" },
+    { name: "PIB", url: "https://pib.gov.in/RssMain.aspx?ModId=6" }
+  ];
+
+  let processedCount = 0;
+
+  for (const source of sources) {
+    try {
+      const feed = await parser.parseURL(source.url);
+      const items = feed.items.slice(0, 3);
+
+      for (const item of items) {
+        const prompt = `
+          As an expert UPSC (Civil Services Examination) mentor, analyze and summarize this news article for an aspirant.
+          
+          Article Title: ${item.title}
+          Article Content: ${item.contentSnippet || item.content}
+          
+          Your task:
+          1. Categorize it by GS Paper (GS I: History/Geography/Society, GS II: Polity/Governance/IR, GS III: Economy/Env/S&T/Security, GS IV: Ethics).
+          2. Provide a concise summary (2-3 sentences) focusing on the "Why it matters for UPSC" aspect.
+          3. Extract 3-4 key "Prelims Facts" (names, dates, locations, organizations).
+          4. Provide a brief "Mains Analysis" point (context, challenges, or way forward).
+          
+          Format the response as STRICT JSON:
+          {
+            "gsPaper": "GS II",
+            "summary": "...",
+            "prelimsFacts": ["...", "..."],
+            "mainsAnalysis": "...",
+            "relevance": "Polity & Governance"
+          }
+        `;
+
+        const aiResult = await genAI.models.generateContent({
+          model: "gemini-3-flash-preview",
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          config: { responseMimeType: "application/json" }
+        });
+        
+        const text = aiResult.text;
+        if (!text) continue;
+        const aiData = JSON.parse(text);
+
+        if (db) {
+          const existing = await db.collection("newsArticles").where("title", "==", item.title).get();
+          if (existing.empty) {
+            await db.collection("newsArticles").add({
+              title: item.title,
+              source: source.name,
+              url: item.link,
+              date: new Date().toISOString().split('T')[0],
+              createdAt: new Date().toISOString(),
+              ...aiData
+            });
+            processedCount++;
+          }
+        }
+      }
+    } catch (err) {
+      console.error(`Failed to process source ${source.name}:`, err);
+    }
+  }
+
+  if (db) {
+    await db.collection("system_meta").doc("news_sync").set({
+      lastSync: new Date().toISOString(),
+      articlesProcessed: processedCount
+    }, { merge: true });
+  }
+  return processedCount;
+};
+
 // API Routes: News Sync (Automated UPSC News Engine)
 app.post("/api/news/sync", async (req, res) => {
     try {
-      const sources = [
-        { name: "The Hindu", url: "https://www.thehindu.com/news/national/feeder/default.rss" },
-        { name: "Indian Express", url: "https://indianexpress.com/section/explained/feed/" },
-        { name: "PIB", url: "https://pib.gov.in/RssMain.aspx?ModId=6" }
-      ];
-
-      let processedCount = 0;
-
-      for (const source of sources) {
-        try {
-          const feed = await parser.parseURL(source.url);
-          // Take top 2 from each for demo
-          const items = feed.items.slice(0, 2);
-
-          for (const item of items) {
-            const prompt = `
-              As an expert UPSC (Civil Services Examination) mentor, analyze and summarize this news article for an aspirant.
-              
-              Article Title: ${item.title}
-              Article Content: ${item.contentSnippet || item.content}
-              
-              Your task:
-              1. Categorize it by GS Paper (GS I: History/Geography/Society, GS II: Polity/Governance/IR, GS III: Economy/Env/S&T/Security, GS IV: Ethics).
-              2. Provide a concise summary (2-3 sentences) focusing on the "Why it matters for UPSC" aspect.
-              3. Extract 3-4 key "Prelims Facts" (names, dates, locations, organizations).
-              4. Provide a brief "Mains Analysis" point (context, challenges, or way forward).
-              
-              Format the response as STRICT JSON:
-              {
-                "gsPaper": "GS II",
-                "summary": "...",
-                "prelimsFacts": ["...", "..."],
-                "mainsAnalysis": "...",
-                "relevance": "Polity & Governance"
-              }
-            `;
-
-            const aiResult = await genAI.models.generateContent({
-              model: "gemini-3-flash-preview",
-              contents: [{ role: "user", parts: [{ text: prompt }] }],
-              config: { responseMimeType: "application/json" }
-            });
-            
-            const text = aiResult.text;
-            if (!text) throw new Error("No response from AI");
-            const aiData = JSON.parse(text);
-
-            if (db) {
-              // Check if article already exists by title
-              const existing = await db.collection("newsArticles").where("title", "==", item.title).get();
-              if (existing.empty) {
-                await db.collection("newsArticles").add({
-                  title: item.title,
-                  source: source.name,
-                  url: item.link,
-                  date: new Date().toISOString().split('T')[0],
-                  createdAt: new Date().toISOString(),
-                  ...aiData
-                });
-                processedCount++;
-              }
-            }
-          }
-        } catch (err) {
-          console.error(`Failed to process source ${source.name}:`, err);
-        }
-      }
-
-      if (db) {
-        await db.collection("system_meta").doc("news_sync").set({
-          lastSync: new Date().toISOString(),
-          articlesProcessed: processedCount
-        }, { merge: true });
-      }
-
+      const processedCount = await syncNews();
       res.json({ 
         status: "success", 
         message: `Imperial News Engine completed reconnaissance. ${processedCount} new articles summarized and archived.` 
@@ -459,7 +461,19 @@ if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
 }
 
 if (!process.env.VERCEL) {
-  app.listen(PORT, "0.0.0.0", () => {
+  // Automated News Sync (Every 6 hours)
+const SYNC_INTERVAL = 6 * 60 * 60 * 1000;
+setInterval(async () => {
+  console.log("Automated News Engine reconnaissance initiated...");
+  try {
+    await syncNews();
+    console.log("Automated news sync completed successfully.");
+  } catch (err) {
+    console.error("Automated news sync failed:", err);
+  }
+}, SYNC_INTERVAL);
+
+app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 }

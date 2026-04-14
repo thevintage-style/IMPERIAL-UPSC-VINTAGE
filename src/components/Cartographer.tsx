@@ -86,11 +86,21 @@ const STRATEGIC_POINTS = [
   }
 ];
 
-function MapUpdater({ center }: { center: [number, number] }) {
+function MapUpdater({ center, onMapClick }: { center: [number, number], onMapClick: (lat: number, lon: number) => void }) {
   const map = useMap();
   useEffect(() => {
     map.setView(center, 8);
   }, [center, map]);
+
+  useEffect(() => {
+    map.on('click', (e) => {
+      onMapClick(e.latlng.lat, e.latlng.lng);
+    });
+    return () => {
+      map.off('click');
+    };
+  }, [map, onMapClick]);
+
   return null;
 }
 
@@ -270,7 +280,10 @@ export function Cartographer({ user }: CartographerProps) {
                 />
               </div>
             )}
-            <MapUpdater center={center} />
+            <MapUpdater center={center} onMapClick={(lat, lon) => {
+              setCenter([lat, lon]);
+              analyzeStrategicSignificance(lat, lon);
+            }} />
             {STRATEGIC_POINTS.map((point, idx) => (
               <Marker 
                 key={idx} 

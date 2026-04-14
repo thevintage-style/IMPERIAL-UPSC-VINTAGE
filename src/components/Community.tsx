@@ -54,6 +54,7 @@ export function Community({ user, isAdmin }: CommunityProps) {
   const [inputText, setInputText] = useState('');
   const [isFiltering, setIsFiltering] = useState(false);
   const [reportingMsg, setReportingMsg] = useState<Message | null>(null);
+  const [view, setView] = useState<'chat' | 'dashboard'>('chat');
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -170,7 +171,72 @@ export function Community({ user, isAdmin }: CommunityProps) {
 
   return (
     <div className="h-full flex flex-col bg-parchment/50 rounded-3xl border-2 border-saddle-brown/20 overflow-hidden shadow-inner">
-      {/* Pinned Messages Header */}
+      {/* View Toggle */}
+      <div className="flex bg-white border-b border-saddle-brown/10 p-2">
+        <button 
+          onClick={() => setView('chat')}
+          className={`flex-1 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${view === 'chat' ? 'bg-saddle-brown text-parchment shadow-md' : 'text-saddle-brown/40 hover:text-saddle-brown'}`}
+        >
+          Imperial Chat
+        </button>
+        <button 
+          onClick={() => setView('dashboard')}
+          className={`flex-1 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${view === 'dashboard' ? 'bg-saddle-brown text-parchment shadow-md' : 'text-saddle-brown/40 hover:text-saddle-brown'}`}
+        >
+          Community Dashboard
+        </button>
+      </div>
+
+      {view === 'dashboard' ? (
+        <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="bg-white p-6 rounded-3xl border border-saddle-brown/10 shadow-sm text-center">
+              <MessageSquare className="mx-auto text-saddle-brown mb-2" size={32} />
+              <p className="text-2xl font-serif font-bold text-leather">{messages.length}</p>
+              <p className="text-[10px] uppercase tracking-widest text-saddle-brown/40">Total Proclamations</p>
+            </div>
+            <div className="bg-white p-6 rounded-3xl border border-saddle-brown/10 shadow-sm text-center">
+              <Sparkles className="mx-auto text-antique-gold mb-2" size={32} />
+              <p className="text-2xl font-serif font-bold text-leather">{new Set(messages.map(m => m.senderId)).size}</p>
+              <p className="text-[10px] uppercase tracking-widest text-saddle-brown/40">Active Scholars</p>
+            </div>
+            <div className="bg-white p-6 rounded-3xl border border-saddle-brown/10 shadow-sm text-center">
+              <Pin className="mx-auto text-saddle-brown/60 mb-2 rotate-45" size={32} />
+              <p className="text-2xl font-serif font-bold text-leather">{messages.filter(m => m.isPinned).length}</p>
+              <p className="text-[10px] uppercase tracking-widest text-saddle-brown/40">Pinned Decrees</p>
+            </div>
+          </div>
+
+          <div className="bg-white p-8 rounded-[40px] border border-saddle-brown/10 shadow-lg">
+            <h4 className="font-serif font-bold text-xl text-leather mb-6 flex items-center gap-2">
+              <ShieldAlert size={20} className="text-antique-gold" />
+              Trending Scholarly Topics
+            </h4>
+            <div className="flex flex-wrap gap-3">
+              {['#UPSC2026', '#EthicsGS4', '#PolityReforms', '#EconomyAnalysis', '#IRTrends', '#HistoryOptional'].map(tag => (
+                <span key={tag} className="px-4 py-2 bg-parchment/50 border border-saddle-brown/10 rounded-full text-xs font-serif italic text-saddle-brown hover:bg-antique-gold/10 transition-colors cursor-pointer">
+                  {tag}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-leather text-parchment p-8 rounded-[40px] shadow-2xl relative overflow-hidden">
+            <div className="relative z-10">
+              <h4 className="font-serif text-2xl font-bold mb-2">The Imperial Code of Conduct</h4>
+              <p className="text-sm font-serif italic opacity-70 mb-6">"Scholars shall maintain the highest level of decorum and focus on the pursuit of administrative excellence."</p>
+              <ul className="space-y-2 text-xs font-serif opacity-90">
+                <li>• No spam or unrelated content.</li>
+                <li>• Respect fellow aspirants.</li>
+                <li>• Share verified intelligence only.</li>
+              </ul>
+            </div>
+            <Sparkles className="absolute -right-10 -bottom-10 w-48 h-48 text-parchment/5 rotate-12" />
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Pinned Messages Header */}
       <AnimatePresence>
         {pinnedMessages.length > 0 && (
           <motion.div 
@@ -322,6 +388,8 @@ export function Community({ user, isAdmin }: CommunityProps) {
           All proclamations are monitored by the Imperial Censors
         </p>
       </div>
+        </>
+      )}
 
       <ReportModal
         isOpen={!!reportingMsg}
