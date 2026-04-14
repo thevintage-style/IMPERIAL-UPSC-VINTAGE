@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { StatueOfUnity } from './StatueOfUnity';
+import { SocialSidebar } from './SocialSidebar';
 import { OracleFloating } from './OracleFloating';
 import { db, collection, onSnapshot, query, where, doc } from '../lib/firebase';
 import { cn } from '../lib/utils';
@@ -238,24 +239,22 @@ export function Layout({ user, activeTab, setActiveTab, children }: LayoutProps)
           </div>
         </header>
 
-        {/* Statue of Unity Vintage Sticker */}
-        <div className="fixed top-4 right-4 z-[6000] pointer-events-none">
+        {/* Imperial Sidebar Stack - Statue + Social Icons */}
+        <div className="fixed bottom-8 right-10 z-[6000] flex flex-col items-center gap-6 pointer-events-none">
           <motion.div 
-            initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
-            animate={{ opacity: 1, scale: 1, rotate: 12 }}
-            whileHover={{ rotate: 0, scale: 1.1 }}
-            className="relative group pointer-events-auto"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="pointer-events-auto"
           >
-            <img 
-              src="https://img.icons8.com/color/96/statue-of-unity.png" 
-              alt="Statue of Unity" 
-              className="w-16 h-16 object-contain filter sepia(0.3) contrast-125 drop-shadow-[0_5px_15px_rgba(0,0,0,0.3)] cursor-help"
-              referrerPolicy="no-referrer"
-            />
-            <div className="absolute top-full right-0 mt-2 w-48 bg-white p-3 rounded-xl border-2 border-[#8B4513]/20 shadow-2xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
-              <p className="text-[10px] font-serif font-bold text-[#8B4513] uppercase tracking-widest mb-1">Statue of Unity</p>
-              <p className="text-[9px] font-serif italic text-[#1A1612]/60 leading-relaxed">The world's tallest statue, symbolizing the unity and integrity of the Indian Union. A beacon for every civil servant.</p>
-            </div>
+            <SocialSidebar />
+          </motion.div>
+          
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="pointer-events-auto"
+          >
+            <StatueOfUnity />
           </motion.div>
         </div>
 

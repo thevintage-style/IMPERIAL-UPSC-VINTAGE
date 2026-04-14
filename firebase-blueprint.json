@@ -285,9 +285,15 @@
       "schema": "StudyLog",
       "description": "User study logs"
     },
-    "/users/{userId}/syllabus/{topicId}": {
-      "schema": "SyllabusProgress",
-      "description": "User syllabus progress"
+    "/syllabusProgress/{userId}": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "completed": { "type": "array", "items": { "type": "string" } },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "description": "User syllabus progress stored as an array of topic IDs."
     },
     "/users/{userId}/notes/{noteId}": {
       "schema": "Note",

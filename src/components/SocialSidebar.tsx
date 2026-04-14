@@ -10,7 +10,7 @@ export function SocialSidebar() {
   ];
 
   return (
-    <div className="fixed right-6 bottom-24 z-[1000] flex flex-col gap-3">
+    <div className="flex flex-col gap-3 items-center">
       {socialLinks.map((link, idx) => (
         <motion.a
           key={link.label}

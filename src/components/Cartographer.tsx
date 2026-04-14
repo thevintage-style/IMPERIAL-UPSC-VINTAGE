@@ -136,8 +136,27 @@ export function Cartographer({ user }: CartographerProps) {
     setIsAnalyzing(true);
     const targetLat = lat ?? center[0];
     const targetLon = lon ?? center[1];
+    
+    // Guest Mode / Mock Data Fallback if API key is missing
+    if (!process.env.VINTAGE_ORACLE_KEY) {
+      setTimeout(() => {
+        setAnalysis(`
+### Strategic Intelligence (Guest Mode)
+**Location:** ${name || `${targetLat.toFixed(2)}, ${targetLon.toFixed(2)}`}
+
+**Geographic Overview:** This region features significant physiographic diversity, crucial for local climate and drainage patterns.
+**Strategic Importance:** Positioned as a key node for regional connectivity and security.
+**UPSC Relevance:** GS Paper I (Physical Geography) and GS Paper III (Internal Security).
+
+*Note: Connect your Imperial Oracle Key for deep-dive AI analysis.*
+        `.trim());
+        setIsAnalyzing(false);
+      }, 1000);
+      return;
+    }
+
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.VINTAGE_ORACLE_KEY || '' });
+      const ai = new GoogleGenAI({ apiKey: process.env.VINTAGE_ORACLE_KEY });
       
       const prompt = detailed 
         ? `As a Senior UPSC Scholar and Strategic Analyst, provide an EXHAUSTIVE deep-dive analysis for the location at [${targetLat}, ${targetLon}] ${name ? `named ${name}` : ''}.
@@ -253,9 +272,12 @@ ${analysis || 'No analysis fetched yet.'}
         <div className="lg:col-span-3 bg-[#F5F2E7] rounded-3xl border-2 border-[#8B4513]/30 shadow-sm overflow-hidden relative scholar-map-container">
           <MapContainer center={center} zoom={5} style={{ height: '100%', width: '100%', background: '#F5F2E7', filter: 'sepia(0.3) contrast(1.1) brightness(0.95)' }} {...({ center, zoom: 5 } as any)}>
             <TileLayer
-              url={activeLayer === 'physical' 
-                ? "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png"
-                : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png"
+              url={
+                activeLayer === 'physical' 
+                  ? "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png"
+                  : activeLayer === 'political'
+                    ? "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                    : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png"
               }
               {...({ attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>' } as any)}
             />

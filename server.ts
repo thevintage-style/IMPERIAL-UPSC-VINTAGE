@@ -12,6 +12,8 @@ import admin from "firebase-admin";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import fs from "fs";
 
+process.env.NODE_ENV = process.env.NODE_ENV || 'development';
+
 // Load Firebase Config
 let firebaseAppletConfig: any = null;
 try {
@@ -105,6 +107,8 @@ const PORT = 3000;
 app.use(express.json());
 
 const syncNews = async () => {
+  try {
+    console.log("Starting News Sync process...");
   const sources = [
     { name: "The Hindu", url: "https://www.thehindu.com/news/national/feeder/default.rss" },
     { name: "Indian Express", url: "https://indianexpress.com/section/explained/feed/" },
@@ -181,6 +185,10 @@ const syncNews = async () => {
     }, { merge: true });
   }
   return processedCount;
+  } catch (globalErr) {
+    console.error("Global News Sync Error:", globalErr);
+    return 0;
+  }
 };
 
 // API Routes: News Sync (Automated UPSC News Engine)
@@ -477,13 +485,24 @@ setInterval(async () => {
 }, SYNC_INTERVAL);
 
 app.listen(PORT, "0.0.0.0", async () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`[Imperial Server] Listening on http://0.0.0.0:${PORT}`);
+    console.log(`[Imperial Server] Environment: ${process.env.NODE_ENV}`);
+    
     if (db) {
-      const snapshot = await db.collection("newsArticles").limit(1).get();
-      if (snapshot.empty) {
-        console.log("News archives empty. Initiating first reconnaissance...");
-        syncNews();
+      try {
+        console.log("[Imperial Server] Checking news archives...");
+        const snapshot = await db.collection("newsArticles").limit(1).get();
+        if (snapshot.empty) {
+          console.log("[Imperial Server] News archives empty. Initiating background reconnaissance...");
+          syncNews().catch(err => console.error("Initial background sync failed:", err));
+        } else {
+          console.log("[Imperial Server] News archives found. Ready for duty.");
+        }
+      } catch (err) {
+        console.error("[Imperial Server] Initial news check failed:", err);
       }
+    } else {
+      console.warn("[Imperial Server] Database not initialized. Some features may be offline.");
     }
   });
 }

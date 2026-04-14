@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Book, ChevronLeft, ChevronRight, CheckCircle2, Circle, Lock, Sparkles } from 'lucide-react';
+import { Book, ChevronLeft, ChevronRight, CheckCircle2, Circle, Lock, Sparkles, Loader2 } from 'lucide-react';
 import { Button } from './ui/button';
+import { db, collection, doc, getDoc, setDoc, onSnapshot } from '../lib/firebase';
 
 interface SyllabusTopic {
   id: string;
@@ -102,10 +103,51 @@ const SYLLABUS_DATA: Record<string, SyllabusPage[]> = {
   ]
 };
 
-export function Syllabus() {
+export function Syllabus({ user }: { user: any }) {
   const [activePaper, setActivePaper] = useState('GS Paper I');
   const [currentPage, setCurrentPage] = useState(0);
   const [direction, setDirection] = useState(0);
+  const [completedTopics, setCompletedTopics] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(true);
+
+  const userId = user?.uid || user?.id;
+
+  useEffect(() => {
+    if (!userId) return;
+
+    const progressRef = doc(db, 'syllabusProgress', userId);
+    const unsubscribe = onSnapshot(progressRef, (doc) => {
+      if (doc.exists()) {
+        const data = doc.data();
+        setCompletedTopics(new Set(data.completed || []));
+      }
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [userId]);
+
+  const toggleTopic = async (topicId: string) => {
+    if (!userId) return;
+
+    const newCompleted = new Set(completedTopics);
+    if (newCompleted.has(topicId)) {
+      newCompleted.delete(topicId);
+    } else {
+      newCompleted.add(topicId);
+    }
+
+    setCompletedTopics(newCompleted);
+
+    try {
+      await setDoc(doc(db, 'syllabusProgress', userId), {
+        completed: Array.from(newCompleted),
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+    } catch (error) {
+      console.error("Error updating syllabus progress:", error);
+    }
+  };
 
   const pages = SYLLABUS_DATA[activePaper];
 
@@ -138,6 +180,12 @@ export function Syllabus() {
       }
     })
   };
+
+  const totalTopics = Object.values(SYLLABUS_DATA).reduce((acc, pages) => 
+    acc + pages.reduce((pAcc, page) => pAcc + page.topics.length, 0), 0
+  );
+  const completedCount = completedTopics.size;
+  const progressPercentage = Math.round((completedCount / totalTopics) * 100);
 
   return (
     <div className="max-w-5xl mx-auto space-y-8 pb-20">
@@ -206,26 +254,30 @@ export function Syllabus() {
               </h3>
 
               <div className="space-y-6 flex-1 overflow-y-auto pr-2 custom-scrollbar">
-                {pages[currentPage].topics.map((topic) => (
-                  <div 
-                    key={topic.id} 
-                    className={`flex items-center justify-between p-4 rounded-2xl border transition-all ${
-                      topic.isLocked 
-                        ? 'bg-gray-50/50 border-gray-100 opacity-60' 
-                        : 'bg-white border-[#5A5A40]/5 hover:border-[#5A5A40]/20 hover:shadow-sm cursor-pointer'
-                    }`}
-                  >
-                    <div className="flex items-center gap-4">
-                      {topic.isCompleted ? (
-                        <CheckCircle2 className="text-green-600" size={20} />
-                      ) : (
-                        <Circle className="text-[#5A5A40]/20" size={20} />
-                      )}
-                      <span className="font-serif text-[#1a1a1a]">{topic.title}</span>
+                {pages[currentPage].topics.map((topic) => {
+                  const isCompleted = completedTopics.has(topic.id);
+                  return (
+                    <div 
+                      key={topic.id} 
+                      onClick={() => !topic.isLocked && toggleTopic(topic.id)}
+                      className={`flex items-center justify-between p-4 rounded-2xl border transition-all ${
+                        topic.isLocked 
+                          ? 'bg-gray-50/50 border-gray-100 opacity-60' 
+                          : 'bg-white border-[#5A5A40]/5 hover:border-[#5A5A40]/20 hover:shadow-sm cursor-pointer'
+                      }`}
+                    >
+                      <div className="flex items-center gap-4">
+                        {isCompleted ? (
+                          <CheckCircle2 className="text-green-600" size={20} />
+                        ) : (
+                          <Circle className="text-[#5A5A40]/20" size={20} />
+                        )}
+                        <span className="font-serif text-[#1a1a1a]">{topic.title}</span>
+                      </div>
+                      {topic.isLocked && <Lock size={16} className="text-[#5A5A40]/40" />}
                     </div>
-                    {topic.isLocked && <Lock size={16} className="text-[#5A5A40]/40" />}
-                  </div>
-                ))}
+                  );
+                })}
 
                 {(pages[currentPage] as any).guidelines && (
                   <div className="mt-8 p-6 bg-[#8B4513]/5 rounded-3xl border border-[#8B4513]/10">
@@ -278,12 +330,12 @@ export function Syllabus() {
         </div>
         <div className="flex items-center gap-8">
           <div className="text-center">
-            <p className="text-3xl font-serif font-bold">12%</p>
+            <p className="text-3xl font-serif font-bold">{progressPercentage}%</p>
             <p className="text-[10px] uppercase tracking-widest font-bold text-white/40">Overall</p>
           </div>
           <div className="h-12 w-[1px] bg-white/10" />
           <div className="text-center">
-            <p className="text-3xl font-serif font-bold">4/32</p>
+            <p className="text-3xl font-serif font-bold">{completedCount}/{totalTopics}</p>
             <p className="text-[10px] uppercase tracking-widest font-bold text-white/40">Topics</p>
           </div>
           <Button className="bg-white text-[#5A5A40] hover:bg-white/90 rounded-xl px-8 py-6 font-bold">

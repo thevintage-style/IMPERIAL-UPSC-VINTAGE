@@ -42,6 +42,11 @@ export default function App() {
   const isAdmin = (user as any)?.email === "raksha05jk.rao@gmail.com";
 
   useEffect(() => {
+    // Safety timeout: Ensure loading screen clears even if auth listeners hang
+    const timeout = setTimeout(() => {
+      setLoading(false);
+    }, 5000);
+
     let supabaseSub: any = null;
     let firebaseUnsubscribe: (() => void) | null = null;
 
@@ -146,6 +151,7 @@ export default function App() {
     }
 
     return () => {
+      clearTimeout(timeout);
       if (supabaseSub) supabaseSub.unsubscribe();
       if (firebaseUnsubscribe) firebaseUnsubscribe();
     };
@@ -280,7 +286,7 @@ export default function App() {
   return (
     <Layout user={user as any} activeTab={activeTab} setActiveTab={setActiveTab}>
       {activeTab === 'dashboard' && <VedicDashboard user={user as any} setActiveTab={setActiveTab} />}
-      {activeTab === 'syllabus' && <Syllabus />}
+      {activeTab === 'syllabus' && <Syllabus user={user as any} />}
       {activeTab === 'oracle' && <Oracle user={user as any} />}
       {activeTab === 'cartographer' && <Cartographer user={user as any} />}
       {activeTab === 'folio' && <Folio user={user as any} />}
@@ -296,8 +302,6 @@ export default function App() {
       {activeTab === 'resources' && <ResourceFeed user={user as any} isAdmin={isAdmin} />}
       {activeTab === 'rules' && isAdmin && <RulesAndRegulations user={user as any} />}
       {activeTab === 'owner-settings' && isAdmin && <OwnerSettings user={user as any} />}
-      
-      <SocialSidebar />
     </Layout>
   );
 }

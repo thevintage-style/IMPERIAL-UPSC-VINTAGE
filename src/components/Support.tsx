@@ -74,6 +74,22 @@ export function Support({ user }: SupportProps) {
 
       // AI Response Logic
       setIsAIThinking(true);
+
+      if (!process.env.VINTAGE_ORACLE_KEY) {
+        setTimeout(async () => {
+          const aiText = "The Grand Vizier is currently in a deep meditative state (Guest Mode). While the Imperial Oracle Key is missing, I can still offer basic guidance on your journey. How may I assist you with the archives today?";
+          await addDoc(collection(db, messagesPath), {
+            chatId,
+            senderId: 'ai-assistant',
+            senderRole: 'ai',
+            text: aiText,
+            createdAt: serverTimestamp()
+          });
+          setIsAIThinking(false);
+        }, 1000);
+        return;
+      }
+
       const prompt = `You are the Grand Vizier of the Imperial Scholar Platform, a legendary UPSC strategist. 
       A student is seeking your guidance.
       

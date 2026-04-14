@@ -31,6 +31,14 @@ export function VizierStudio({ user }: VizierStudioProps) {
     setPrompt('');
     setResponses(prev => [...prev, { role: 'user', content: userPrompt }]);
     setIsProcessing(true);
+    
+    if (!process.env.VINTAGE_ORACLE_KEY) {
+      setTimeout(() => {
+        setResponses(prev => [...prev, { role: 'vizier', content: "The Imperial Forge is currently in **Safe Mode** (Guest Mode). While the Oracle Key is missing, I can still discuss architectural concepts, but I cannot forge new AI-driven logic at this time.\n\n*Tip: Ask me about the Parchment Design System!*" }]);
+        setIsProcessing(false);
+      }, 1000);
+      return;
+    }
 
     try {
       const aiResult = await ai.models.generateContent({

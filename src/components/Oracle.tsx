@@ -45,6 +45,14 @@ export function Oracle({ user }: OracleProps) {
     setInput('');
     setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
     setIsLoading(true);
+    
+    if (!process.env.VINTAGE_ORACLE_KEY) {
+      setTimeout(() => {
+        setMessages(prev => [...prev, { role: 'bot', content: "Greetings, Aspirant. I am currently operating in **Guest Mode** because the Imperial Oracle Key is not connected. I can still discuss general UPSC strategy, but my deep-dive intelligence is limited.\n\n*Tip: Ask me about GS Paper II preparation!*" }]);
+        setIsLoading(false);
+      }, 1000);
+      return;
+    }
 
     try {
       const context = await fetchContext();
