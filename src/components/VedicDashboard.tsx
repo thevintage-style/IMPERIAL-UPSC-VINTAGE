@@ -28,7 +28,7 @@ export function VedicDashboard({ user, setActiveTab }: VedicDashboardProps) {
   useEffect(() => {
     const fetchQuote = async () => {
       try {
-        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+        const ai = new GoogleGenAI({ apiKey: process.env.VINTAGE_ORACLE_KEY || "" });
         const aiResult = await ai.models.generateContent({
           model: "gemini-3-flash-preview",
           contents: [{ role: "user", parts: [{ text: `

@@ -68,7 +68,7 @@ try {
   }
 }
 const parser = new Parser();
-const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+const genAI = new GoogleGenAI({ apiKey: process.env.VINTAGE_ORACLE_KEY || "" });
 
 // Rate Limiting Middleware
 const rateLimits = new Map<string, { count: number, lastReset: number }>();
@@ -149,7 +149,10 @@ const syncNews = async () => {
         
         const text = aiResult.text;
         if (!text) continue;
-        const aiData = JSON.parse(text);
+        
+        // Sanitize JSON string in case AI wraps it in markdown blocks
+        const jsonStr = text.replace(/```json\n?|```/g, '').trim();
+        const aiData = JSON.parse(jsonStr);
 
         if (db) {
           const existing = await db.collection("newsArticles").where("title", "==", item.title).get();
@@ -473,8 +476,15 @@ setInterval(async () => {
   }
 }, SYNC_INTERVAL);
 
-app.listen(PORT, "0.0.0.0", () => {
+app.listen(PORT, "0.0.0.0", async () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    if (db) {
+      const snapshot = await db.collection("newsArticles").limit(1).get();
+      if (snapshot.empty) {
+        console.log("News archives empty. Initiating first reconnaissance...");
+        syncNews();
+      }
+    }
   });
 }
 

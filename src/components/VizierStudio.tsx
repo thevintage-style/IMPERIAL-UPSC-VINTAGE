@@ -16,7 +16,7 @@ export function VizierStudio({ user }: VizierStudioProps) {
   const [isProcessing, setIsProcessing] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+  const ai = new GoogleGenAI({ apiKey: process.env.VINTAGE_ORACLE_KEY || "" });
 
   useEffect(() => {
     if (scrollRef.current) {

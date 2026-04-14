@@ -3,10 +3,12 @@ import { User } from 'firebase/auth';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { Search, Navigation, Info, Sparkles, MapPin, Compass, Layers, Wind, Droplets, Mountain } from 'lucide-react';
+import { Search, Navigation, Info, Sparkles, MapPin, Compass, Layers, Wind, Droplets, Mountain, Save, Edit3, Loader2 } from 'lucide-react';
 import { Button } from './ui/button';
 import { GoogleGenAI } from '@google/genai';
 import { motion, AnimatePresence } from 'motion/react';
+import { supabase } from '../lib/supabase';
+import ReactMarkdown from 'react-markdown';
 
 // Custom Vintage Icon
 const createVintageIcon = (color: string) => L.divIcon({
@@ -110,6 +112,12 @@ export function Cartographer({ user }: CartographerProps) {
   const [analysis, setAnalysis] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [activeLayer, setActiveLayer] = useState<'political' | 'physical' | 'rivers' | 'plateaus'>('political');
+  const [selectedPoint, setSelectedPoint] = useState<{lat: number, lon: number, name?: string} | null>(null);
+  const [annotation, setAnnotation] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
+
+  const userId = (user as any).uid || (user as any).id;
 
   const handleSearch = async () => {
     if (!searchQuery) return;
@@ -124,19 +132,28 @@ export function Cartographer({ user }: CartographerProps) {
     }
   };
 
-  const analyzeStrategicSignificance = async (lat?: number, lon?: number, name?: string) => {
+  const analyzeStrategicSignificance = async (lat?: number, lon?: number, name?: string, detailed = false) => {
     setIsAnalyzing(true);
     const targetLat = lat ?? center[0];
     const targetLon = lon ?? center[1];
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+      const ai = new GoogleGenAI({ apiKey: process.env.VINTAGE_ORACLE_KEY || '' });
       
-      const prompt = `As a UPSC Geography and Strategic Expert, analyze the location at coordinates [${targetLat}, ${targetLon}] ${name ? `named ${name}` : ''}. 
-      Provide a concise analysis (max 150 words) covering:
-      1. Geographic significance (rivers, terrain, climate).
-      2. Strategic/Security importance for India.
-      3. Historical or UPSC-relevant facts (GI tags, treaties, conflicts).
-      Format with clear headings.`;
+      const prompt = detailed 
+        ? `As a Senior UPSC Scholar and Strategic Analyst, provide an EXHAUSTIVE deep-dive analysis for the location at [${targetLat}, ${targetLon}] ${name ? `named ${name}` : ''}.
+           Cover the following in great detail:
+           1. PHYSIOGRAPHY: Detailed terrain, soil types, drainage patterns, and climatic influences.
+           2. STRATEGIC DEPTH: Military significance, border dynamics, and regional power play.
+           3. ECONOMIC GEOGRAPHY: Resource potential, infrastructure projects (Gati Shakti, etc.), and local industries.
+           4. HISTORICAL CONTEXT: Ancient to modern significance, relevant treaties, and cultural heritage.
+           5. UPSC SYLLABUS LINKAGE: Explicitly link to GS Paper I, II, and III topics.
+           Use a scholarly, sophisticated tone. Format with clear, bold headings and bullet points.`
+        : `As a UPSC Geography and Strategic Expert, analyze the location at coordinates [${targetLat}, ${targetLon}] ${name ? `named ${name}` : ''}. 
+           Provide a concise analysis (max 150 words) covering:
+           1. Geographic significance (rivers, terrain, climate).
+           2. Strategic/Security importance for India.
+           3. Historical or UPSC-relevant facts (GI tags, treaties, conflicts).
+           Format with clear headings.`;
 
       const aiResult = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
@@ -148,6 +165,42 @@ export function Cartographer({ user }: CartographerProps) {
       setAnalysis("The Imperial archives are temporarily inaccessible. Please try again.");
     } finally {
       setIsAnalyzing(false);
+    }
+  };
+
+  const handleSaveToVault = async () => {
+    if (!userId || !selectedPoint) return;
+    setIsSaving(true);
+    setSaveStatus('saving');
+    try {
+      const content = `
+### Location: ${selectedPoint.name || 'Custom Point'}
+**Coordinates:** ${selectedPoint.lat.toFixed(4)}, ${selectedPoint.lon.toFixed(4)}
+
+**Personal Annotation:**
+${annotation || 'No annotation provided.'}
+
+**AI Strategic Analysis:**
+${analysis || 'No analysis fetched yet.'}
+      `.trim();
+
+      const { error } = await supabase
+        .from('notes')
+        .insert([{
+          user_id: userId,
+          title: `Map Annotation: ${selectedPoint.name || `${selectedPoint.lat.toFixed(2)}, ${selectedPoint.lon.toFixed(2)}`}`,
+          type: 'note',
+          content: content
+        }]);
+
+      if (error) throw error;
+      setSaveStatus('success');
+      setTimeout(() => setSaveStatus('idle'), 3000);
+    } catch (error) {
+      console.error("Error saving to vault:", error);
+      setSaveStatus('error');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -282,6 +335,8 @@ export function Cartographer({ user }: CartographerProps) {
             )}
             <MapUpdater center={center} onMapClick={(lat, lon) => {
               setCenter([lat, lon]);
+              setSelectedPoint({ lat, lon });
+              setAnnotation('');
               analyzeStrategicSignificance(lat, lon);
             }} />
             {STRATEGIC_POINTS.map((point, idx) => (
@@ -291,32 +346,57 @@ export function Cartographer({ user }: CartographerProps) {
                 eventHandlers={{
                   click: () => {
                     setCenter(point.coords as [number, number]);
+                    setSelectedPoint({ lat: point.coords[0], lon: point.coords[1], name: point.name });
+                    setAnnotation('');
                     analyzeStrategicSignificance(point.coords[0], point.coords[1], point.name);
                   },
                 }}
               >
                 <Popup>
-                  <div className="font-serif p-1 min-w-[180px]">
-                    <h4 className="font-bold text-[#5A5A40] border-b border-[#5A5A40]/10 pb-1 mb-2">{point.name}</h4>
+                  <div className="font-serif p-1 min-w-[220px]">
+                    <h4 className="font-bold text-[#8B4513] border-b border-[#8B4513]/10 pb-1 mb-2">{point.name}</h4>
                     <p className="text-[11px] italic text-gray-600 mb-2 leading-tight">{point.info}</p>
-                    <div className="bg-[#5A5A40]/5 p-2 rounded-lg border border-[#5A5A40]/10">
-                      <p className="text-[9px] font-bold text-[#5A5A40] uppercase tracking-widest mb-1">UPSC Context</p>
+                    <div className="bg-[#8B4513]/5 p-2 rounded-lg border border-[#8B4513]/10 mb-3">
+                      <p className="text-[9px] font-bold text-[#8B4513] uppercase tracking-widest mb-1">UPSC Context</p>
                       <p className="text-[10px] leading-relaxed">{(point as any).upsc}</p>
                     </div>
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        analyzeStrategicSignificance(point.coords[0], point.coords[1], point.name);
-                      }}
-                      className="mt-3 w-full py-2 bg-[#5A5A40] text-white text-[10px] rounded-lg hover:bg-[#4A4A30] transition-colors flex items-center justify-center gap-2"
-                    >
-                      <Compass size={10} />
-                      Deep Analysis
-                    </button>
+                    
+                    <div className="space-y-2">
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          analyzeStrategicSignificance(point.coords[0], point.coords[1], point.name, true);
+                        }}
+                        className="w-full py-2 bg-[#8B4513] text-[#F5F2E7] text-[10px] rounded-lg hover:bg-[#1A1612] transition-colors flex items-center justify-center gap-2"
+                      >
+                        <Sparkles size={10} />
+                        Deep AI Analysis
+                      </button>
+                    </div>
                   </div>
                 </Popup>
               </Marker>
             ))}
+            {selectedPoint && !STRATEGIC_POINTS.some(p => p.coords[0] === selectedPoint.lat && p.coords[1] === selectedPoint.lon) && (
+              <Marker position={[selectedPoint.lat, selectedPoint.lon]} {...({ icon: createVintageIcon('#D4AF37') } as any)}>
+                <Popup>
+                  <div className="font-serif p-1 min-w-[220px]">
+                    <h4 className="font-bold text-[#8B4513] border-b border-[#8B4513]/10 pb-1 mb-2">Custom Point</h4>
+                    <p className="text-[10px] text-gray-600 mb-2">Coordinates: {selectedPoint.lat.toFixed(4)}, {selectedPoint.lon.toFixed(4)}</p>
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        analyzeStrategicSignificance(selectedPoint.lat, selectedPoint.lon, undefined, true);
+                      }}
+                      className="w-full py-2 bg-[#8B4513] text-[#F5F2E7] text-[10px] rounded-lg hover:bg-[#1A1612] transition-colors flex items-center justify-center gap-2"
+                    >
+                      <Sparkles size={10} />
+                      Deep AI Analysis
+                    </button>
+                  </div>
+                </Popup>
+              </Marker>
+            )}
           </MapContainer>
           
           <div className="absolute bottom-6 right-6 z-[1000]">
@@ -332,6 +412,42 @@ export function Cartographer({ user }: CartographerProps) {
         </div>
 
         <div className="space-y-6 overflow-y-auto pr-2 custom-scrollbar">
+          {selectedPoint && (
+            <div className="bg-white p-6 rounded-3xl border-2 border-[#8B4513]/20 shadow-lg">
+              <h3 className="font-serif font-bold text-[#8B4513] mb-4 flex items-center gap-2">
+                <MapPin size={18} />
+                Selected Location
+              </h3>
+              <div className="space-y-4">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-[#8B4513]/60 mb-1">Coordinates</p>
+                  <p className="text-sm font-serif">{selectedPoint.lat.toFixed(4)}, {selectedPoint.lon.toFixed(4)}</p>
+                </div>
+                
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-[#8B4513]/60 mb-1 block">Personal Annotation</label>
+                  <textarea 
+                    value={annotation}
+                    onChange={(e) => setAnnotation(e.target.value)}
+                    placeholder="Add your scholarly notes for this location..."
+                    className="w-full bg-[#F5F2E7]/50 border border-[#8B4513]/10 rounded-xl p-3 text-xs font-serif outline-none focus:border-[#D4AF37] resize-none h-24"
+                  />
+                </div>
+
+                <Button 
+                  onClick={handleSaveToVault}
+                  disabled={isSaving}
+                  className={`w-full rounded-xl flex items-center justify-center gap-2 transition-all ${
+                    saveStatus === 'success' ? 'bg-green-600' : 'bg-[#8B4513] hover:bg-[#1A1612]'
+                  } text-[#F5F2E7]`}
+                >
+                  {isSaving ? <Loader2 size={16} className="animate-spin" /> : saveStatus === 'success' ? <Save size={16} /> : <Save size={16} />}
+                  {saveStatus === 'success' ? 'Saved to Vault' : saveStatus === 'error' ? 'Error Saving' : 'Save to Personal Vault'}
+                </Button>
+              </div>
+            </div>
+          )}
+
           <div className="bg-white p-6 rounded-3xl border border-[#5A5A40]/10 shadow-sm">
             <h3 className="font-serif font-bold text-[#5A5A40] mb-4 flex items-center gap-2">
               <Navigation size={18} />
@@ -352,13 +468,16 @@ export function Cartographer({ user }: CartographerProps) {
           </div>
 
           {analysis && (
-            <div className="bg-[#5A5A40] text-white p-6 rounded-3xl shadow-lg border border-white/10">
-              <h3 className="font-serif font-bold mb-3 flex items-center gap-2">
-                <Info size={18} />
-                Strategic Insight
+            <div className="bg-[#1A1612] text-[#F5F2E7] p-6 rounded-3xl shadow-xl border-2 border-[#D4AF37]/30">
+              <h3 className="font-serif font-bold mb-4 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Sparkles size={18} className="text-[#D4AF37]" />
+                  Strategic Insight
+                </div>
+                {isAnalyzing && <Loader2 size={14} className="animate-spin text-[#D4AF37]" />}
               </h3>
-              <div className="text-xs font-serif leading-relaxed opacity-90 whitespace-pre-wrap">
-                {analysis}
+              <div className="text-[11px] font-serif leading-relaxed prose prose-invert prose-p:my-1 prose-headings:text-[#D4AF37] prose-headings:text-sm prose-headings:mt-3 prose-headings:mb-1 custom-scrollbar max-h-[400px] overflow-y-auto pr-2">
+                <ReactMarkdown>{analysis}</ReactMarkdown>
               </div>
             </div>
           )}

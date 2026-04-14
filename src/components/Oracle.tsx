@@ -48,7 +48,7 @@ export function Oracle({ user }: OracleProps) {
 
     try {
       const context = await fetchContext();
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+      const ai = new GoogleGenAI({ apiKey: process.env.VINTAGE_ORACLE_KEY || '' });
       
       const aiResult = await ai.models.generateContent({ 
         model: "gemini-3-flash-preview",

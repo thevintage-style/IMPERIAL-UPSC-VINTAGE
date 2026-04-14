@@ -196,13 +196,6 @@ export function Layout({ user, activeTab, setActiveTab, children }: LayoutProps)
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col h-screen overflow-hidden relative">
-        {/* Statue of Unity Miniature */}
-        <div className="absolute bottom-4 right-4 z-50 pointer-events-none">
-          <StatueOfUnity />
-          <div className="text-center -mt-8">
-            <p className="text-[8px] font-bold uppercase tracking-[0.3em] text-[#8B4513]/40">Iron Man of India</p>
-          </div>
-        </div>
         {activeOffers.length > 0 && (
           <div className="bg-[#5A5A40] text-white py-2 px-4 flex items-center justify-center gap-4 overflow-hidden whitespace-nowrap">
             <AnimatePresence mode="wait">
@@ -242,20 +235,29 @@ export function Layout({ user, activeTab, setActiveTab, children }: LayoutProps)
               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
               <span className="text-[10px] font-bold uppercase tracking-widest text-[#5A5A40]">Archives Live</span>
             </div>
-            <div className="relative group">
-              <img 
-                src="https://img.icons8.com/color/96/statue-of-unity.png" 
-                alt="Statue of Unity" 
-                className="w-10 h-10 object-contain filter sepia(0.2) drop-shadow-md group-hover:scale-110 transition-transform cursor-help"
-                referrerPolicy="no-referrer"
-              />
-              <div className="absolute top-full right-0 mt-2 w-48 bg-white p-3 rounded-xl border border-[#5A5A40]/10 shadow-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
-                <p className="text-[10px] font-serif font-bold text-[#5A5A40] uppercase tracking-widest mb-1">Statue of Unity</p>
-                <p className="text-[9px] font-serif italic text-[#5A5A40]/60 leading-relaxed">The world's tallest statue, symbolizing the unity and integrity of the Indian Union.</p>
-              </div>
-            </div>
           </div>
         </header>
+
+        {/* Statue of Unity Vintage Sticker */}
+        <div className="fixed top-4 right-4 z-[6000] pointer-events-none">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
+            animate={{ opacity: 1, scale: 1, rotate: 12 }}
+            whileHover={{ rotate: 0, scale: 1.1 }}
+            className="relative group pointer-events-auto"
+          >
+            <img 
+              src="https://img.icons8.com/color/96/statue-of-unity.png" 
+              alt="Statue of Unity" 
+              className="w-16 h-16 object-contain filter sepia(0.3) contrast-125 drop-shadow-[0_5px_15px_rgba(0,0,0,0.3)] cursor-help"
+              referrerPolicy="no-referrer"
+            />
+            <div className="absolute top-full right-0 mt-2 w-48 bg-white p-3 rounded-xl border-2 border-[#8B4513]/20 shadow-2xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+              <p className="text-[10px] font-serif font-bold text-[#8B4513] uppercase tracking-widest mb-1">Statue of Unity</p>
+              <p className="text-[9px] font-serif italic text-[#1A1612]/60 leading-relaxed">The world's tallest statue, symbolizing the unity and integrity of the Indian Union. A beacon for every civil servant.</p>
+            </div>
+          </motion.div>
+        </div>
 
         <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
           <AnimatePresence mode="wait">

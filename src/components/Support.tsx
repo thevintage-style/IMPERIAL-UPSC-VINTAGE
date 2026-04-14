@@ -18,7 +18,7 @@ export function Support({ user }: SupportProps) {
   const [chatId, setChatId] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+  const ai = new GoogleGenAI({ apiKey: process.env.VINTAGE_ORACLE_KEY || "" });
 
   useEffect(() => {
     // Find or create chat session

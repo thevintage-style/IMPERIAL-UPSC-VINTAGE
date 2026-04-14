@@ -59,7 +59,7 @@ export function Folio({ user }: FolioProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const userId = (user as any).uid || (user as any).id;
-  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+  const ai = new GoogleGenAI({ apiKey: process.env.VINTAGE_ORACLE_KEY || "" });
 
   const fetchNotes = useCallback(async () => {
     if (!userId) return;
