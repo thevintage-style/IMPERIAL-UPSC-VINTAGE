@@ -375,26 +375,38 @@ ${analysis || 'No analysis fetched yet.'}
                 }}
               >
                 <Popup>
-                  <div className="font-serif p-1 min-w-[220px]">
-                    <h4 className="font-bold text-[#8B4513] border-b border-[#8B4513]/10 pb-1 mb-2">{point.name}</h4>
-                    <p className="text-[11px] italic text-gray-600 mb-2 leading-tight">{point.info}</p>
-                    <div className="bg-[#8B4513]/5 p-2 rounded-lg border border-[#8B4513]/10 mb-3">
-                      <p className="text-[9px] font-bold text-[#8B4513] uppercase tracking-widest mb-1">UPSC Context</p>
-                      <p className="text-[10px] leading-relaxed">{(point as any).upsc}</p>
+                  <div className="font-serif p-2 min-w-[240px] bg-parchment border-2 border-saddle-brown/20 rounded-xl shadow-xl">
+                    <div className="flex items-center justify-between mb-2 border-b border-saddle-brown/10 pb-2">
+                      <h4 className="font-bold text-leather text-sm">{point.name}</h4>
+                      <div className="px-2 py-0.5 bg-antique-gold/20 text-saddle-brown text-[8px] font-bold rounded-full uppercase tracking-tighter">
+                        {point.type}
+                      </div>
                     </div>
                     
-                    <div className="space-y-2">
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          analyzeStrategicSignificance(point.coords[0], point.coords[1], point.name, true);
-                        }}
-                        className="w-full py-2 bg-[#8B4513] text-[#F5F2E7] text-[10px] rounded-lg hover:bg-[#1A1612] transition-colors flex items-center justify-center gap-2"
-                      >
-                        <Sparkles size={10} />
-                        Deep AI Analysis
-                      </button>
+                    <p className="text-[11px] text-leather/80 mb-3 leading-relaxed italic">
+                      {point.info}
+                    </p>
+
+                    <div className="bg-saddle-brown/5 p-3 rounded-lg border border-saddle-brown/10 mb-4">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <Info size={10} className="text-antique-gold" />
+                        <p className="text-[9px] font-bold text-saddle-brown uppercase tracking-widest">UPSC Relevance</p>
+                      </div>
+                      <p className="text-[10px] leading-relaxed text-leather/90">
+                        {point.upsc}
+                      </p>
                     </div>
+                    
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        analyzeStrategicSignificance(point.coords[0], point.coords[1], point.name, true);
+                      }}
+                      className="w-full py-2.5 bg-saddle-brown text-parchment text-[10px] font-bold uppercase tracking-widest rounded-xl hover:bg-leather transition-all flex items-center justify-center gap-2 shadow-md hover:shadow-lg active:scale-95"
+                    >
+                      <Sparkles size={12} className="text-antique-gold" />
+                      Deep AI Analysis
+                    </button>
                   </div>
                 </Popup>
               </Marker>
@@ -402,17 +414,17 @@ ${analysis || 'No analysis fetched yet.'}
             {selectedPoint && !STRATEGIC_POINTS.some(p => p.coords[0] === selectedPoint.lat && p.coords[1] === selectedPoint.lon) && (
               <Marker position={[selectedPoint.lat, selectedPoint.lon]} {...({ icon: createVintageIcon('#D4AF37') } as any)}>
                 <Popup>
-                  <div className="font-serif p-1 min-w-[220px]">
-                    <h4 className="font-bold text-[#8B4513] border-b border-[#8B4513]/10 pb-1 mb-2">Custom Point</h4>
-                    <p className="text-[10px] text-gray-600 mb-2">Coordinates: {selectedPoint.lat.toFixed(4)}, {selectedPoint.lon.toFixed(4)}</p>
+                  <div className="font-serif p-2 min-w-[240px] bg-parchment border-2 border-saddle-brown/20 rounded-xl shadow-xl">
+                    <h4 className="font-bold text-leather text-sm border-b border-saddle-brown/10 pb-2 mb-2">Custom Strategic Point</h4>
+                    <p className="text-[10px] text-leather/60 mb-3">Coordinates: {selectedPoint.lat.toFixed(4)}, {selectedPoint.lon.toFixed(4)}</p>
                     <button 
                       onClick={(e) => {
                         e.stopPropagation();
                         analyzeStrategicSignificance(selectedPoint.lat, selectedPoint.lon, undefined, true);
                       }}
-                      className="w-full py-2 bg-[#8B4513] text-[#F5F2E7] text-[10px] rounded-lg hover:bg-[#1A1612] transition-colors flex items-center justify-center gap-2"
+                      className="w-full py-2.5 bg-saddle-brown text-parchment text-[10px] font-bold uppercase tracking-widest rounded-xl hover:bg-leather transition-all flex items-center justify-center gap-2 shadow-md hover:shadow-lg active:scale-95"
                     >
-                      <Sparkles size={10} />
+                      <Sparkles size={12} className="text-antique-gold" />
                       Deep AI Analysis
                     </button>
                   </div>

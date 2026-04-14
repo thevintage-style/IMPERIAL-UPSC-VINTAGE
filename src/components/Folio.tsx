@@ -58,6 +58,8 @@ export function Folio({ user }: FolioProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+
   const userId = (user as any).uid || (user as any).id;
   const ai = new GoogleGenAI({ apiKey: process.env.VINTAGE_ORACLE_KEY || "" });
 
@@ -238,16 +240,16 @@ export function Folio({ user }: FolioProps) {
     }
   };
 
-const deleteNote = async (id: string) => {
-  if (!confirm("Are you sure you want to delete this log?")) return;
-  try {
-    const { error } = await supabase.from('logs').delete().eq('id', id);
-    if (error) throw error;
-    if (activeNote?.id === id) setActiveNote(null);
-  } catch (error) {
-    console.error("Error deleting log:", error);
-  }
-};
+  const deleteNote = async (id: string) => {
+    try {
+      const { error } = await supabase.from('logs').delete().eq('id', id);
+      if (error) throw error;
+      if (activeNote?.id === id) setActiveNote(null);
+      setConfirmDelete(null);
+    } catch (error) {
+      console.error("Error deleting log:", error);
+    }
+  };
 
   const runAIOCR = async () => {
     const canvas = canvasRef.current;
@@ -291,6 +293,30 @@ const deleteNote = async (id: string) => {
 
   return (
     <div className="flex flex-col h-full gap-6">
+      {/* Confirmation Modal */}
+      <AnimatePresence>
+        {confirmDelete && (
+          <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white p-8 rounded-[32px] border-2 border-red-100 shadow-2xl max-w-sm w-full text-center"
+            >
+              <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6">
+                <Trash2 className="text-red-500" size={32} />
+              </div>
+              <h3 className="text-xl font-serif font-bold text-gray-900 mb-2">Delete Log Entry?</h3>
+              <p className="text-sm text-gray-500 font-serif italic mb-8">This action cannot be undone. The log will be permanently removed from your Folio.</p>
+              <div className="flex gap-3">
+                <Button onClick={() => setConfirmDelete(null)} variant="ghost" className="flex-1 rounded-xl">Cancel</Button>
+                <Button onClick={() => deleteNote(confirmDelete)} className="flex-1 bg-red-500 hover:bg-red-600 text-white rounded-xl">Delete</Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Header Toolbar */}
       <div className="bg-white p-4 rounded-3xl border border-[#5A5A40]/10 shadow-sm flex items-center justify-between">
         <div className="flex items-center gap-4 flex-1">
@@ -367,7 +393,7 @@ const deleteNote = async (id: string) => {
                     </p>
                   </button>
                   <button 
-                    onClick={(e) => { e.stopPropagation(); deleteNote(note.id); }}
+                    onClick={(e) => { e.stopPropagation(); setConfirmDelete(note.id); }}
                     className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
                   >
                     <Trash2 size={12} />

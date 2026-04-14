@@ -9,21 +9,19 @@ import { Oracle } from './components/Oracle';
 import { Cartographer } from './components/Cartographer';
 import { Folio } from './components/Folio';
 import { NewsDesk } from './components/NewsDesk';
+import { IntegratedResourceHub } from './components/IntegratedResourceHub';
 import { Subscription } from './components/Subscription';
 import { OwnerSettings } from './components/OwnerSettings';
-import { Archives } from './components/Archives';
 import { Syllabus } from './components/Syllabus';
 import { Support } from './components/Support';
 import { Profile } from './components/Profile';
 import { VizierStudio } from './components/VizierStudio';
 import { Community } from './components/Community';
 import { PeerChat } from './components/PeerChat';
-import { ResourceFeed } from './components/ResourceFeed';
 import { SocialSidebar } from './components/SocialSidebar';
 import { RulesAndRegulations } from './components/RulesAndRegulations';
 import { VedicDashboard } from './components/VedicDashboard';
 import { PersonalVault } from './components/PersonalVault';
-import { Library } from './components/Library';
 import { Button } from './components/ui/button';
 import { LogIn, BookOpen } from 'lucide-react';
 
@@ -291,7 +289,7 @@ export default function App() {
       {activeTab === 'cartographer' && <Cartographer user={user as any} />}
       {activeTab === 'folio' && <Folio user={user as any} />}
       {activeTab === 'news' && <NewsDesk user={user as any} />}
-      {activeTab === 'archives' && <Library user={user as any} isAdmin={isAdmin} />}
+      {activeTab === 'resource-hub' && <IntegratedResourceHub user={user as any} isAdmin={isAdmin} />}
       {activeTab === 'vault' && <PersonalVault user={user as any} />}
       {activeTab === 'subscription' && <Subscription user={user as any} />}
       {activeTab === 'support' && <Support user={user as any} />}
@@ -299,7 +297,6 @@ export default function App() {
       {activeTab === 'vizier-studio' && <VizierStudio user={user as any} />}
       {activeTab === 'community' && <Community user={user as any} isAdmin={isAdmin} />}
       {activeTab === 'peer-chat' && <PeerChat user={user as any} />}
-      {activeTab === 'resources' && <ResourceFeed user={user as any} isAdmin={isAdmin} />}
       {activeTab === 'rules' && isAdmin && <RulesAndRegulations user={user as any} />}
       {activeTab === 'owner-settings' && isAdmin && <OwnerSettings user={user as any} />}
     </Layout>

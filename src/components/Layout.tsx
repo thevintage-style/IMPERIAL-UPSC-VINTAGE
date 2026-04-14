@@ -26,7 +26,6 @@ import {
   Star
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { StatueOfUnity } from './StatueOfUnity';
 import { SocialSidebar } from './SocialSidebar';
 import { OracleFloating } from './OracleFloating';
 import { db, collection, onSnapshot, query, where, doc } from '../lib/firebase';
@@ -73,9 +72,8 @@ export function Layout({ user, activeTab, setActiveTab, children }: LayoutProps)
     { id: 'syllabus', label: 'Syllabus', icon: Book },
     { id: 'cartographer', label: 'AI Map Suite', icon: MapIcon },
     { id: 'folio', label: 'Log Book', icon: PenTool },
-    { id: 'archives', label: 'Imperial Library', icon: LibraryIcon },
+    { id: 'resource-hub', label: 'Resource Hub', icon: LibraryIcon },
     { id: 'vault', label: 'Personal Vault', icon: Archive },
-    { id: 'resources', label: 'Resource Feed', icon: BookOpen },
     { id: 'community', label: 'Community', icon: Users },
     { id: 'peer-chat', label: 'Peer Network', icon: Zap },
     { id: 'news', label: 'News Desk', icon: Newspaper },
@@ -239,22 +237,14 @@ export function Layout({ user, activeTab, setActiveTab, children }: LayoutProps)
           </div>
         </header>
 
-        {/* Imperial Sidebar Stack - Statue + Social Icons */}
-        <div className="fixed bottom-8 right-10 z-[6000] flex flex-col items-center gap-6 pointer-events-none">
+        {/* Imperial Social Sidebar - Bottom Right */}
+        <div className="fixed bottom-8 right-10 z-[6000] pointer-events-none">
           <motion.div 
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
             className="pointer-events-auto"
           >
             <SocialSidebar />
-          </motion.div>
-          
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="pointer-events-auto"
-          >
-            <StatueOfUnity />
           </motion.div>
         </div>
 

@@ -149,7 +149,7 @@ export function VedicDashboard({ user, setActiveTab }: VedicDashboardProps) {
       {/* Recent Activities / Suggested Paths */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {[
-          { title: 'NCERT Library', desc: 'Class 6-12 Essentials', icon: BookOpen, tab: 'resources' },
+          { title: 'NCERT Library', desc: 'Class 6-12 Essentials', icon: BookOpen, tab: 'resource-hub' },
           { title: 'AI Map Suite', desc: 'Interactive Topography', icon: ChevronRight, tab: 'cartographer' },
           { title: 'Personal Vault', desc: 'Your Saved Archives', icon: Calendar, tab: 'vault' },
           { title: 'Vizier Support', desc: 'Expert Consultation', icon: Sparkles, tab: 'support' },

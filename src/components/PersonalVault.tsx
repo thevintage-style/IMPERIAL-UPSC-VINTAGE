@@ -55,6 +55,10 @@ export function PersonalVault({ user }: PersonalVaultProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 
+  const [isAddingFolder, setIsAddingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState<{id: string, type: 'item' | 'folder'} | null>(null);
+
   const userId = (user as any).uid || (user as any).id;
 
   useEffect(() => {
@@ -107,17 +111,18 @@ export function PersonalVault({ user }: PersonalVaultProps) {
   }, [userId]);
 
   const handleCreateFolder = async () => {
-    const name = prompt("Enter folder name:");
-    if (!name) return;
+    if (!newFolderName) return;
     try {
       const { error } = await supabase
         .from('vault_folders')
         .insert([{
-          name,
+          name: newFolderName,
           user_id: userId,
           parent_id: currentFolderId
         }]);
       if (error) throw error;
+      setIsAddingFolder(false);
+      setNewFolderName('');
     } catch (error) {
       console.error("Error creating folder:", error);
     }
@@ -142,7 +147,6 @@ export function PersonalVault({ user }: PersonalVaultProps) {
   };
 
   const handleDeleteItem = async (id: string, type: 'item' | 'folder') => {
-    if (!confirm(`Are you sure you want to delete this ${type}?`)) return;
     try {
       if (type === 'item') {
         const { error } = await supabase.from('notes').delete().eq('id', id);
@@ -151,6 +155,7 @@ export function PersonalVault({ user }: PersonalVaultProps) {
         const { error } = await supabase.from('vault_folders').delete().eq('id', id);
         if (error) throw error;
       }
+      setConfirmDelete(null);
     } catch (error) {
       console.error("Error deleting:", error);
     }
@@ -199,6 +204,64 @@ export function PersonalVault({ user }: PersonalVaultProps) {
 
   return (
     <div className="h-full flex flex-col space-y-6">
+      {/* Confirmation Modal */}
+      <AnimatePresence>
+        {confirmDelete && (
+          <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white p-8 rounded-[32px] border-2 border-red-100 shadow-2xl max-w-sm w-full text-center"
+            >
+              <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6">
+                <Trash2 className="text-red-500" size={32} />
+              </div>
+              <h3 className="text-xl font-serif font-bold text-gray-900 mb-2">Delete {confirmDelete.type === 'folder' ? 'Folder' : 'Resource'}?</h3>
+              <p className="text-sm text-gray-500 font-serif italic mb-8">This action cannot be undone. All contents will be permanently removed.</p>
+              <div className="flex gap-3">
+                <Button onClick={() => setConfirmDelete(null)} variant="ghost" className="flex-1 rounded-xl">Cancel</Button>
+                <Button onClick={() => handleDeleteItem(confirmDelete.id, confirmDelete.type)} className="flex-1 bg-red-500 hover:bg-red-600 text-white rounded-xl">Delete</Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* New Folder Modal */}
+      <AnimatePresence>
+        {isAddingFolder && (
+          <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-[#F5F2E7] p-8 rounded-[32px] border-4 border-[#8B4513] shadow-2xl max-w-sm w-full"
+            >
+              <h3 className="text-xl font-serif font-bold text-[#8B4513] mb-6">Create New Folder</h3>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-[#8B4513]/60">Folder Name</label>
+                  <input 
+                    type="text"
+                    autoFocus
+                    value={newFolderName}
+                    onChange={(e) => setNewFolderName(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleCreateFolder()}
+                    className="w-full bg-white border-2 border-[#8B4513]/10 rounded-xl py-3 px-4 font-serif outline-none focus:border-[#D4AF37]"
+                    placeholder="e.g. Ancient History"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-3 mt-8">
+                <Button onClick={() => setIsAddingFolder(false)} variant="ghost" className="flex-1 rounded-xl border-2 border-[#8B4513]/10 text-[#8B4513]">Cancel</Button>
+                <Button onClick={handleCreateFolder} className="flex-1 bg-[#8B4513] hover:bg-[#1A1612] text-[#F5F2E7] rounded-xl">Create</Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Header & Breadcrumbs */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm font-serif">
@@ -221,7 +284,7 @@ export function PersonalVault({ user }: PersonalVaultProps) {
           ))}
         </div>
         <div className="flex gap-2">
-          <Button onClick={handleCreateFolder} variant="ghost" className="border-2 border-[#8B4513]/10 rounded-xl flex items-center gap-2 text-[#8B4513]">
+          <Button onClick={() => setIsAddingFolder(true)} variant="ghost" className="border-2 border-[#8B4513]/10 rounded-xl flex items-center gap-2 text-[#8B4513]">
             <Folder size={18} />
             New Folder
           </Button>
@@ -280,7 +343,7 @@ export function PersonalVault({ user }: PersonalVaultProps) {
                 <div className="flex items-center justify-between mb-2">
                   <Folder className="text-[#D4AF37]" size={32} fill="currentColor" fillOpacity={0.2} />
                   <button 
-                    onClick={(e) => { e.stopPropagation(); handleDeleteItem(folder.id, 'folder'); }}
+                    onClick={(e) => { e.stopPropagation(); setConfirmDelete({id: folder.id, type: 'folder'}); }}
                     className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 transition-opacity"
                   >
                     <Trash2 size={14} />
@@ -311,7 +374,7 @@ export function PersonalVault({ user }: PersonalVaultProps) {
                         <Edit3 size={14} />
                       </button>
                     )}
-                    <button onClick={() => handleDeleteItem(item.id, 'item')} className="text-red-400 hover:text-red-600">
+                    <button onClick={() => setConfirmDelete({id: item.id, type: 'item'})} className="text-red-400 hover:text-red-600">
                       <Trash2 size={14} />
                     </button>
                   </div>

@@ -9,7 +9,9 @@ import {
   serverTimestamp, 
   doc, 
   deleteDoc,
-  where
+  where,
+  limit,
+  setDoc
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { 
@@ -23,7 +25,8 @@ import {
   Folder,
   ChevronRight,
   FileText,
-  Video
+  Video,
+  Sparkles
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { motion, AnimatePresence } from 'motion/react';
@@ -45,6 +48,7 @@ interface LibraryProps {
 
 export function Library({ user, isAdmin }: LibraryProps) {
   const [resources, setResources] = useState<LibraryResource[]>([]);
+  const [recentlyViewed, setRecentlyViewed] = useState<LibraryResource[]>([]);
   const [activeCategory, setActiveCategory] = useState<'ncert' | 'standard'>('ncert');
   const [activeFolder, setActiveFolder] = useState<string>('All');
   const [isAdding, setIsAdding] = useState(false);
@@ -58,6 +62,36 @@ export function Library({ user, isAdmin }: LibraryProps) {
     });
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    const q = query(
+      collection(db, 'recentlyViewed'), 
+      where('userId', '==', user.uid),
+      orderBy('viewedAt', 'desc'),
+      limit(5)
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const viewedIds = snapshot.docs.map(doc => doc.data().resourceId);
+      const viewedResources = viewedIds.map(id => resources.find(r => r.id === id)).filter(Boolean) as LibraryResource[];
+      setRecentlyViewed(viewedResources);
+    });
+    return () => unsubscribe();
+  }, [user?.uid, resources]);
+
+  const recordView = async (resource: LibraryResource) => {
+    if (!user?.uid) return;
+    try {
+      const viewRef = doc(db, 'recentlyViewed', `${user.uid}_${resource.id}`);
+      await setDoc(viewRef, {
+        userId: user.uid,
+        resourceId: resource.id,
+        viewedAt: serverTimestamp()
+      });
+    } catch (error) {
+      console.error("Error recording view:", error);
+    }
+  };
 
   const handleAddResource = async () => {
     if (!newResource.title || !newResource.url) return;
@@ -116,6 +150,39 @@ export function Library({ user, isAdmin }: LibraryProps) {
           </Button>
         )}
       </div>
+
+      {/* Recently Viewed Section */}
+      {recentlyViewed.length > 0 && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2 text-saddle-brown/60">
+            <Sparkles size={16} className="text-antique-gold" />
+            <h3 className="text-xs font-bold uppercase tracking-widest">Recently Viewed Scrolls</h3>
+          </div>
+          <div className="flex gap-4 overflow-x-auto pb-2 custom-scrollbar">
+            {recentlyViewed.map((res) => (
+              <motion.a
+                key={`recent-${res.id}`}
+                href={res.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => recordView(res)}
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                className="flex-shrink-0 w-64 bg-white p-4 rounded-2xl border border-saddle-brown/10 shadow-sm hover:shadow-md transition-all flex items-center gap-3 group"
+              >
+                <div className="p-2 bg-parchment rounded-xl text-saddle-brown group-hover:bg-antique-gold group-hover:text-leather transition-colors">
+                  {res.type === 'pdf' ? <FileText size={18} /> : <Video size={18} />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-serif font-bold text-leather truncate">{res.title}</p>
+                  <p className="text-[10px] text-saddle-brown/40 uppercase tracking-widest">{res.folder}</p>
+                </div>
+                <ChevronRight size={16} className="text-saddle-brown/20 group-hover:text-antique-gold transition-colors" />
+              </motion.a>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Category Tabs */}
       <div className="flex gap-4 border-b border-saddle-brown/10 pb-4">
@@ -203,6 +270,7 @@ export function Library({ user, isAdmin }: LibraryProps) {
                         href={res.url} 
                         target="_blank" 
                         rel="noopener noreferrer"
+                        onClick={() => recordView(res)}
                         className="p-2 bg-antique-gold text-leather rounded-xl hover:bg-saddle-brown hover:text-parchment transition-all shadow-sm"
                       >
                         {res.type === 'pdf' ? <Download size={18} /> : <ExternalLink size={18} />}

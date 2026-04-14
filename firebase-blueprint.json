@@ -192,6 +192,21 @@
       },
       "required": ["userId", "message", "type"]
     },
+    "ResourceHubItem": {
+      "title": "Resource Hub Item",
+      "description": "Integrated UPSC study materials with upload metadata.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "file_url": { "type": "string" },
+        "uploader_name": { "type": "string" },
+        "uploader_id": { "type": "string" },
+        "category": { "type": "string", "enum": ["ncert", "standard", "current-affairs", "notes"] },
+        "type": { "type": "string", "enum": ["pdf", "video", "link"] },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "file_url", "uploader_name", "category"]
+    },
     "SupportChat": {
       "title": "Support Chat",
       "description": "Real-time support chat sessions.",
@@ -298,6 +313,10 @@
     "/users/{userId}/notes/{noteId}": {
       "schema": "Note",
       "description": "User notes"
+    },
+    "/resource_hub/{id}": {
+      "schema": "ResourceHubItem",
+      "description": "Integrated UPSC study materials hub"
     }
   }
 }
