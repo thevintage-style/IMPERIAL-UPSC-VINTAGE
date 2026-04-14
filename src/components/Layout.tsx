@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { StatueOfUnity } from './StatueOfUnity';
+import { OracleFloating } from './OracleFloating';
 import { db, collection, onSnapshot, query, where, doc } from '../lib/firebase';
 import { cn } from '../lib/utils';
 
@@ -79,11 +80,11 @@ export function Layout({ user, activeTab, setActiveTab, children }: LayoutProps)
     { id: 'news', label: 'News Desk', icon: Newspaper },
     { id: 'oracle', label: 'The Oracle', icon: Sparkles },
     { id: 'subscription', label: 'Commission', icon: Crown },
-    { id: 'vizier-studio', label: 'Vizier Forge', icon: Cpu },
     { id: 'support', label: 'Vizier Support', icon: MessageCircle },
   ];
 
   if (user?.email === "raksha05jk.rao@gmail.com") {
+    navItems.push({ id: 'vizier-studio', label: 'Vizier Forge', icon: Cpu });
     navItems.push({ id: 'rules', label: 'Regulation Vault', icon: Gavel });
     navItems.push({ id: 'owner-settings', label: 'Vizier', icon: Shield });
   }
@@ -241,6 +242,18 @@ export function Layout({ user, activeTab, setActiveTab, children }: LayoutProps)
               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
               <span className="text-[10px] font-bold uppercase tracking-widest text-[#5A5A40]">Archives Live</span>
             </div>
+            <div className="relative group">
+              <img 
+                src="https://img.icons8.com/color/96/statue-of-unity.png" 
+                alt="Statue of Unity" 
+                className="w-10 h-10 object-contain filter sepia(0.2) drop-shadow-md group-hover:scale-110 transition-transform cursor-help"
+                referrerPolicy="no-referrer"
+              />
+              <div className="absolute top-full right-0 mt-2 w-48 bg-white p-3 rounded-xl border border-[#5A5A40]/10 shadow-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+                <p className="text-[10px] font-serif font-bold text-[#5A5A40] uppercase tracking-widest mb-1">Statue of Unity</p>
+                <p className="text-[9px] font-serif italic text-[#5A5A40]/60 leading-relaxed">The world's tallest statue, symbolizing the unity and integrity of the Indian Union.</p>
+              </div>
+            </div>
           </div>
         </header>
 
@@ -259,6 +272,8 @@ export function Layout({ user, activeTab, setActiveTab, children }: LayoutProps)
           </AnimatePresence>
         </div>
       </main>
+
+      <OracleFloating user={user} />
 
       <style>{`
         .gold-leaf-text {

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { User } from 'firebase/auth';
 import { Newspaper, ExternalLink, Bookmark, RefreshCw, ChevronRight, Zap, BookOpen, Clock } from 'lucide-react';
 import { Button } from './ui/button';
-import { db, collection, onSnapshot, query, orderBy, OperationType, handleFirestoreError } from '../lib/firebase';
+import { db, collection, onSnapshot, query, orderBy, OperationType, handleFirestoreError, doc } from '../lib/firebase';
 
 interface NewsDeskProps {
   user: User;
@@ -10,6 +10,7 @@ interface NewsDeskProps {
 
 export function NewsDesk({ user }: NewsDeskProps) {
   const [news, setNews] = useState<any[]>([]);
+  const [lastSync, setLastSync] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const isAdmin = user?.email === "raksha05jk.rao@gmail.com";
@@ -23,7 +24,17 @@ export function NewsDesk({ user }: NewsDeskProps) {
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, path);
     });
-    return () => unsubscribe();
+
+    const metaUnsubscribe = onSnapshot(doc(db, 'system_meta', 'news_sync'), (snapshot) => {
+      if (snapshot.exists()) {
+        setLastSync(snapshot.data());
+      }
+    });
+
+    return () => {
+      unsubscribe();
+      metaUnsubscribe();
+    };
   }, []);
 
   const handleSync = async () => {
@@ -45,6 +56,11 @@ export function NewsDesk({ user }: NewsDeskProps) {
         <div>
           <h3 className="font-serif text-3xl font-bold text-[#1a1a1a]">Daily Reconnaissance</h3>
           <p className="text-sm font-serif italic text-[#5A5A40]/60">Summarized intelligence from The Hindu, Indian Express, and PIB.</p>
+          {lastSync && (
+            <p className="text-[10px] font-bold uppercase tracking-widest text-[#D4AF37] mt-1">
+              Last Intelligence Update: {new Date(lastSync.lastSync).toLocaleString()}
+            </p>
+          )}
         </div>
         <div className="flex gap-2">
           {isAdmin && (

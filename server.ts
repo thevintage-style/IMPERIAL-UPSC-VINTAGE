@@ -123,43 +123,51 @@ app.post("/api/news/sync", async (req, res) => {
 
           for (const item of items) {
             const prompt = `
-              Summarize this article for a UPSC aspirant. 
-              Categorize it by GS Paper (GS I, GS II, GS III, or GS IV). 
+              As an expert UPSC (Civil Services Examination) mentor, analyze and summarize this news article for an aspirant.
+              
               Article Title: ${item.title}
               Article Content: ${item.contentSnippet || item.content}
               
-              Format the response as JSON:
+              Your task:
+              1. Categorize it by GS Paper (GS I: History/Geography/Society, GS II: Polity/Governance/IR, GS III: Economy/Env/S&T/Security, GS IV: Ethics).
+              2. Provide a concise summary (2-3 sentences) focusing on the "Why it matters for UPSC" aspect.
+              3. Extract 3-4 key "Prelims Facts" (names, dates, locations, organizations).
+              4. Provide a brief "Mains Analysis" point (context, challenges, or way forward).
+              
+              Format the response as STRICT JSON:
               {
-                "gsPaper": "GS X",
+                "gsPaper": "GS II",
                 "summary": "...",
-                "prelimsFacts": ["fact 1", "fact 2"],
+                "prelimsFacts": ["...", "..."],
                 "mainsAnalysis": "...",
-                "schemes": ["scheme 1"]
+                "relevance": "Polity & Governance"
               }
             `;
 
-            const response = await genAI.models.generateContent({
+            const aiResult = await genAI.models.generateContent({
               model: "gemini-3-flash-preview",
-              contents: prompt,
+              contents: [{ role: "user", parts: [{ text: prompt }] }],
               config: { responseMimeType: "application/json" }
             });
             
-            const text = response.text;
-            
-            // Clean JSON if needed
-            const jsonStr = text.replace(/```json/g, "").replace(/```/g, "").trim();
-            const aiData = JSON.parse(jsonStr);
+            const text = aiResult.text;
+            if (!text) throw new Error("No response from AI");
+            const aiData = JSON.parse(text);
 
             if (db) {
-              await db.collection("newsArticles").add({
-                title: item.title,
-                source: source.name,
-                url: item.link,
-                date: new Date().toISOString().split('T')[0],
-                createdAt: new Date().toISOString(),
-                ...aiData
-              });
-              processedCount++;
+              // Check if article already exists by title
+              const existing = await db.collection("newsArticles").where("title", "==", item.title).get();
+              if (existing.empty) {
+                await db.collection("newsArticles").add({
+                  title: item.title,
+                  source: source.name,
+                  url: item.link,
+                  date: new Date().toISOString().split('T')[0],
+                  createdAt: new Date().toISOString(),
+                  ...aiData
+                });
+                processedCount++;
+              }
             }
           }
         } catch (err) {
@@ -167,9 +175,16 @@ app.post("/api/news/sync", async (req, res) => {
         }
       }
 
+      if (db) {
+        await db.collection("system_meta").doc("news_sync").set({
+          lastSync: new Date().toISOString(),
+          articlesProcessed: processedCount
+        }, { merge: true });
+      }
+
       res.json({ 
         status: "success", 
-        message: `Imperial News Engine completed reconnaissance. ${processedCount} articles summarized and archived.` 
+        message: `Imperial News Engine completed reconnaissance. ${processedCount} new articles summarized and archived.` 
       });
     } catch (error) {
       console.error("News sync error:", error);

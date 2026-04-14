@@ -83,17 +83,17 @@ export function Community({ user, isAdmin }: CommunityProps) {
   const filterMessage = async (text: string) => {
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
-      const response = await ai.models.generateContent({
+      const aiResult = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
-        contents: `
+        contents: [{ role: "user", parts: [{ text: `
           Analyze the following message for a UPSC study community. 
           If the message is related to UPSC, studies, current affairs, or general academic motivation, return "SAFE".
           If it is spam, offensive, or completely unrelated to studies, return "UNSAFE".
           
           Message: "${text}"
-        `
+        ` }] }]
       });
-      return response.text.trim().toUpperCase().includes("SAFE");
+      return (aiResult.text || "").trim().toUpperCase().includes("SAFE");
     } catch (error) {
       console.error("AI Filter Error:", error);
       return true; // Default to safe if AI fails

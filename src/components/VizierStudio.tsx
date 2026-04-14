@@ -33,18 +33,18 @@ export function VizierStudio({ user }: VizierStudioProps) {
     setIsProcessing(true);
 
     try {
-      const response = await ai.models.generateContent({
+      const aiResult = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
-        contents: `
+        contents: [{ role: "user", parts: [{ text: `
           You are the Grand Vizier, a master architect and AI assistant for the Imperial UPSC Portal.
           The user is a developer or owner asking for technical advice, code snippets, or feature ideas.
           Maintain a scholarly, vintage, yet highly technical persona.
           
           User Request: ${userPrompt}
-        `
+        ` }] }]
       });
       
-      setResponses(prev => [...prev, { role: 'vizier', content: response.text || "" }]);
+      setResponses(prev => [...prev, { role: 'vizier', content: aiResult.text || "" }]);
     } catch (error) {
       console.error("Vizier Studio Error:", error);
       setResponses(prev => [...prev, { role: 'vizier', content: "The Imperial conduits are currently congested. Please try again later." }]);

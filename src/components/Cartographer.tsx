@@ -128,11 +128,11 @@ export function Cartographer({ user }: CartographerProps) {
       3. Historical or UPSC-relevant facts (GI tags, treaties, conflicts).
       Format with clear headings.`;
 
-      const response = await ai.models.generateContent({
+      const aiResult = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
-        contents: prompt
+        contents: [{ role: "user", parts: [{ text: prompt }] }]
       });
-      setAnalysis(response.text);
+      setAnalysis(aiResult.text || "The Imperial archives are temporarily inaccessible.");
     } catch (error) {
       console.error("Analysis failed", error);
       setAnalysis("The Imperial archives are temporarily inaccessible. Please try again.");

@@ -50,7 +50,7 @@ export function Oracle({ user }: OracleProps) {
       const context = await fetchContext();
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
       
-      const response = await ai.models.generateContent({ 
+      const aiResult = await ai.models.generateContent({ 
         model: "gemini-3-flash-preview",
         config: {
           systemInstruction: `You are a world-class UPSC (Civil Services) mentor. Your tone is scholarly, encouraging, and highly analytical. 
@@ -61,10 +61,10 @@ export function Oracle({ user }: OracleProps) {
           When answering, use this context if relevant. If the student asks about specific recent news, refer to these summaries. 
           Always relate topics to the UPSC syllabus (GS I-IV). Use bullet points for clarity.`
         },
-        contents: userMsg
+        contents: [{ role: "user", parts: [{ text: userMsg }] }]
       });
 
-      const responseText = response.text;
+      const responseText = aiResult.text;
 
       setMessages(prev => [...prev, { role: 'bot', content: responseText || "The Oracle is momentarily clouded. Please rephrase." }]);
     } catch (error) {

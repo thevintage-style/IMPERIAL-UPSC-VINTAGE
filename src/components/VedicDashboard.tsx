@@ -29,15 +29,15 @@ export function VedicDashboard({ user, setActiveTab }: VedicDashboardProps) {
     const fetchQuote = async () => {
       try {
         const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
-        const response = await ai.models.generateContent({
+        const aiResult = await ai.models.generateContent({
           model: "gemini-3-flash-preview",
-          contents: `
+          contents: [{ role: "user", parts: [{ text: `
             Generate a powerful, motivational quote for a UPSC (Civil Services) aspirant. 
             The quote should be inspired by Vedic wisdom, ancient Indian philosophy, or the grit required for public service.
             Format: Quote | Author
-          `
+          ` }] }]
         });
-        const text = response.text.trim();
+        const text = (aiResult.text || "").trim();
         const [q, a] = text.split('|');
         setQuote(q || text);
         setAuthor(a || "Ancient Wisdom");
