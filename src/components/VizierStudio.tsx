@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { User } from 'firebase/auth';
 import { GoogleGenAI } from "@google/genai";
-import { Terminal, Sparkles, Send, Code, Cpu, Zap, History } from 'lucide-react';
+import { Terminal, Sparkles, Send, Code, Cpu, Zap, History, RefreshCw, X } from 'lucide-react';
 import { Button } from './ui/button';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
@@ -23,6 +23,10 @@ export function VizierStudio({ user }: VizierStudioProps) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [responses]);
+
+  const [analysisType, setAnalysisType] = useState<'Code Review' | 'Conceptual Explanation' | 'Potential Improvements'>('Code Review');
+  const [analysisResult, setAnalysisResult] = useState('');
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const handleConsult = async () => {
     if (!prompt.trim() || isProcessing) return;
@@ -58,6 +62,43 @@ export function VizierStudio({ user }: VizierStudioProps) {
       setResponses(prev => [...prev, { role: 'vizier', content: "The Imperial conduits are currently congested. Please try again later." }]);
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const handleAnalyze = async () => {
+    if (responses.length < 2 || isAnalyzing) return;
+    
+    setIsAnalyzing(true);
+    const lastUserMsg = responses.filter(r => r.role === 'user').pop();
+    const lastVizierMsg = responses.filter(r => r.role === 'vizier').pop();
+
+    if (!lastUserMsg || !lastVizierMsg) {
+      setIsAnalyzing(false);
+      return;
+    }
+
+    try {
+      const analysisPrompt = `
+        As the Grand Vizier, perform a ${analysisType} on the following exchange:
+        
+        Architect's Prompt: ${lastUserMsg.content}
+        Vizier's Response: ${lastVizierMsg.content}
+        
+        Provide a deep, scholarly analysis focused on ${analysisType}.
+        Use markdown for formatting.
+      `;
+
+      const result = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [{ role: "user", parts: [{ text: analysisPrompt }] }]
+      });
+
+      setAnalysisResult(result.text || "The analysis yielded no insights.");
+    } catch (error) {
+      console.error("Analysis Error:", error);
+      setAnalysisResult("The analysis was interrupted by a spectral disturbance.");
+    } finally {
+      setIsAnalyzing(false);
     }
   };
 
@@ -172,8 +213,55 @@ export function VizierStudio({ user }: VizierStudioProps) {
           </div>
         </div>
 
-        {/* Sidebar: Blueprints */}
-        <div className="w-80 space-y-6">
+        {/* Sidebar: Blueprints & Analysis */}
+        <div className="w-80 space-y-6 overflow-y-auto custom-scrollbar pr-2">
+          <div className="parchment-card p-6">
+            <h3 className="font-display font-bold text-leather mb-4 flex items-center gap-2">
+              <Cpu size={18} className="text-saddle-brown" />
+              Forge Analysis
+            </h3>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-saddle-brown/60">Analysis Type</label>
+                <select 
+                  value={analysisType}
+                  onChange={(e) => setAnalysisType(e.target.value as any)}
+                  className="w-full bg-white border border-saddle-brown/20 rounded-xl py-2 px-3 text-xs font-serif outline-none focus:border-saddle-brown"
+                >
+                  <option value="Code Review">Code Review</option>
+                  <option value="Conceptual Explanation">Conceptual Explanation</option>
+                  <option value="Potential Improvements">Potential Improvements</option>
+                </select>
+              </div>
+              <Button 
+                onClick={handleAnalyze}
+                disabled={responses.length < 2 || isAnalyzing}
+                className="w-full bg-antique-gold text-leather hover:bg-antique-gold/80 rounded-xl text-xs font-bold py-4"
+              >
+                {isAnalyzing ? <RefreshCw className="animate-spin mr-2" size={14} /> : <Sparkles size={14} className="mr-2" />}
+                Analyze Last Exchange
+              </Button>
+            </div>
+
+            <AnimatePresence>
+              {analysisResult && (
+                <motion.div 
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  className="mt-6 p-4 bg-leather/5 rounded-2xl border border-saddle-brown/10"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-saddle-brown">Result</span>
+                    <button onClick={() => setAnalysisResult('')} className="text-saddle-brown/40 hover:text-saddle-brown"><X size={12} /></button>
+                  </div>
+                  <div className="prose prose-xs font-serif italic text-leather/80 max-h-64 overflow-y-auto custom-scrollbar">
+                    <ReactMarkdown>{analysisResult}</ReactMarkdown>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
           <div className="parchment-card p-6">
             <h3 className="font-display font-bold text-leather mb-4 flex items-center gap-2">
               <History size={18} className="text-saddle-brown" />

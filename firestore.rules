@@ -128,7 +128,8 @@ service cloud.firestore {
     }
     match /newsArticles/{id} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow create, delete: if isAdmin();
+      allow update: if isAuthenticated();
     }
     match /videos/{id} {
       allow read: if true;
@@ -235,6 +236,12 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated();
       allow update, delete: if isAdmin() || (isAuthenticated() && resource.data.uploader_id == request.auth.uid);
+    }
+
+    // System Meta
+    match /system_meta/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
   }
 }

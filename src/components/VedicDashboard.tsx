@@ -61,7 +61,21 @@ export function VedicDashboard({ user, setActiveTab }: VedicDashboardProps) {
   ];
 
   return (
-    <div className="space-y-8 pb-12">
+    <div className="space-y-8 pb-12 relative">
+      {/* 2D Bronze Sticker - Top Right */}
+      <div className="absolute top-[-20px] right-[-20px] z-50 p-[30px]">
+        <div className="relative group">
+          <div className="w-24 h-24 bg-[#D4AF37] rounded-full border-4 border-white shadow-[0_0_0_2px_rgba(139,69,19,0.2)] flex flex-col items-center justify-center text-center p-2 transform rotate-12 group-hover:rotate-0 transition-transform duration-500">
+            <span className="text-[8px] font-bold text-leather uppercase tracking-tighter leading-none">Iron Man</span>
+            <span className="text-[10px] font-display font-black text-leather uppercase leading-none">OF INDIA</span>
+            <div className="w-8 h-0.5 bg-leather/20 my-1" />
+            <span className="text-[6px] font-serif italic text-leather/60">Imperial Seal</span>
+          </div>
+          {/* Die-cut white border effect */}
+          <div className="absolute inset-[-4px] border-4 border-white rounded-full -z-10 shadow-lg" />
+        </div>
+      </div>
+
       {/* Welcome Banner */}
       <div className="relative p-12 rounded-[40px] bg-leather text-parchment overflow-hidden shadow-2xl parchment-glow">
         <div className="absolute top-0 right-0 w-64 h-64 bg-antique-gold/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl" />

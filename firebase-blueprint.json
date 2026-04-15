@@ -68,16 +68,31 @@
     },
     "Note": {
       "title": "Note",
-      "description": "User notes, including text and canvas data.",
+      "description": "User notes, including journal, sheet, and canvas data.",
       "type": "object",
       "properties": {
         "userId": { "type": "string" },
+        "folderId": { "type": "string", "description": "ID of the parent folder" },
         "title": { "type": "string" },
-        "content": { "type": "string" },
+        "journalData": { "type": "string", "description": "Text content for the Digital Journal" },
+        "sheetData": { "type": "string", "description": "JSON string of the Log Sheet table" },
         "canvasData": { "type": "string", "description": "JSON string of canvas strokes" },
+        "aiSummary": { "type": "string", "description": "AI generated summary" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "title"]
+    },
+    "Folder": {
+      "title": "Folder",
+      "description": "Folders for organizing notes and resources.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "parentId": { "type": "string", "description": "ID of the parent folder for hierarchy" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name"]
     },
     "UpiId": {
       "title": "UPI ID",
@@ -111,6 +126,8 @@
       "description": "UPSC study materials (PDFs, Links).",
       "type": "object",
       "properties": {
+        "userId": { "type": "string" },
+        "folderId": { "type": "string", "description": "ID of the parent folder" },
         "title": { "type": "string" },
         "category": { "type": "string", "enum": ["prelims", "mains", "interview", "current-affairs"] },
         "type": { "type": "string", "enum": ["pdf", "video", "link"] },
@@ -134,6 +151,8 @@
         "schemes": { "type": "array", "items": { "type": "string" } },
         "url": { "type": "string" },
         "date": { "type": "string", "format": "date" },
+        "aiAnalyzed": { "type": "boolean" },
+        "analyzedAt": { "type": "string", "format": "date-time" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["title", "source", "gsPaper", "summary"]
@@ -313,6 +332,10 @@
     "/users/{userId}/notes/{noteId}": {
       "schema": "Note",
       "description": "User notes"
+    },
+    "/users/{userId}/folders/{folderId}": {
+      "schema": "Folder",
+      "description": "User folders"
     },
     "/resource_hub/{id}": {
       "schema": "ResourceHubItem",

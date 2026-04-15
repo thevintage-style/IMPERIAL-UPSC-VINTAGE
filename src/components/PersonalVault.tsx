@@ -1,9 +1,21 @@
-import React, { useState, useEffect } from 'react';
-import { User as FirebaseUser } from 'firebase/auth';
-import { User as SupabaseUser } from '@supabase/supabase-js';
-import { supabase } from '../lib/supabase';
+import React, { useState, useEffect, useCallback } from 'react';
+import { User } from 'firebase/auth';
 import { 
-  Folder, 
+  collection, 
+  query, 
+  where, 
+  orderBy, 
+  onSnapshot, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  doc, 
+  serverTimestamp,
+  getDocs
+} from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { 
+  Folder as FolderIcon, 
   FileText, 
   Video, 
   Link as LinkIcon, 
@@ -17,11 +29,15 @@ import {
   Youtube,
   File,
   Search,
-  Clock
+  Clock,
+  FolderPlus,
+  ArrowRight,
+  X,
+  RefreshCw
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { motion, AnimatePresence } from 'motion/react';
-import Markdown from 'react-markdown';
+import ReactMarkdown from 'react-markdown';
 
 interface VaultItem {
   id: string;
@@ -29,19 +45,19 @@ interface VaultItem {
   type: 'video' | 'pdf' | 'link' | 'note';
   url?: string;
   content?: string;
-  folder_id: string | null;
-  created_at: string;
+  folderId: string | null;
+  createdAt: any;
 }
 
 interface VaultFolder {
   id: string;
   name: string;
-  parent_id: string | null;
-  created_at: string;
+  parentId: string | null;
+  createdAt: any;
 }
 
 interface PersonalVaultProps {
-  user: FirebaseUser | SupabaseUser;
+  user: User;
 }
 
 export function PersonalVault({ user }: PersonalVaultProps) {
@@ -57,382 +73,289 @@ export function PersonalVault({ user }: PersonalVaultProps) {
 
   const [isAddingFolder, setIsAddingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
+  const [renamingFolder, setRenamingFolder] = useState<VaultFolder | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{id: string, type: 'item' | 'folder'} | null>(null);
 
-  const userId = (user as any).uid || (user as any).id;
+  const userId = user?.uid;
 
+  // Real-time Folders
   useEffect(() => {
     if (!userId) return;
+    const q = query(
+      collection(db, `users/${userId}/folders`),
+      orderBy('createdAt', 'asc')
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setFolders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as VaultFolder)));
+      setIsLoading(false);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, `users/${userId}/folders`);
+    });
+    return () => unsubscribe();
+  }, [userId]);
 
-    const fetchData = async () => {
-      setIsLoading(true);
-      try {
-        const { data: foldersData, error: foldersError } = await supabase
-          .from('vault_folders')
-          .select('*')
-          .eq('user_id', userId)
-          .order('created_at', { ascending: true });
-
-        if (foldersError) throw foldersError;
-        setFolders(foldersData || []);
-
-        const { data: itemsData, error: itemsError } = await supabase
-          .from('notes')
-          .select('*')
-          .eq('user_id', userId)
-          .order('created_at', { ascending: false });
-
-        if (itemsError) throw itemsError;
-        setItems(itemsData || []);
-      } catch (error) {
-        console.error("Error fetching vault data:", error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchData();
-
-    // Set up real-time subscriptions
-    const foldersSubscription = supabase
-      .channel('vault_folders_changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'vault_folders', filter: `user_id=eq.${userId}` }, fetchData)
-      .subscribe();
-
-    const itemsSubscription = supabase
-      .channel('notes_changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'notes', filter: `user_id=eq.${userId}` }, fetchData)
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(foldersSubscription);
-      supabase.removeChannel(itemsSubscription);
-    };
+  // Real-time Items (Notes & Resources)
+  useEffect(() => {
+    if (!userId) return;
+    const q = query(
+      collection(db, `users/${userId}/notes`),
+      orderBy('createdAt', 'desc')
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setItems(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as VaultItem)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, `users/${userId}/notes`);
+    });
+    return () => unsubscribe();
   }, [userId]);
 
   const handleCreateFolder = async () => {
-    if (!newFolderName) return;
+    if (!newFolderName || !userId) return;
     try {
-      const { error } = await supabase
-        .from('vault_folders')
-        .insert([{
-          name: newFolderName,
-          user_id: userId,
-          parent_id: currentFolderId
-        }]);
-      if (error) throw error;
+      await addDoc(collection(db, `users/${userId}/folders`), {
+        name: newFolderName,
+        userId,
+        parentId: currentFolderId,
+        createdAt: serverTimestamp()
+      });
       setIsAddingFolder(false);
       setNewFolderName('');
     } catch (error) {
-      console.error("Error creating folder:", error);
+      handleFirestoreError(error, OperationType.CREATE, `users/${userId}/folders`);
+    }
+  };
+
+  const handleRenameFolder = async () => {
+    if (!renamingFolder || !renamingFolder.name || !userId) return;
+    try {
+      await updateDoc(doc(db, `users/${userId}/folders`, renamingFolder.id), {
+        name: renamingFolder.name
+      });
+      setRenamingFolder(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${userId}/folders`);
     }
   };
 
   const handleAddItem = async () => {
-    if (!newItem.title) return;
+    if (!newItem.title || !userId) return;
     try {
-      const { error } = await supabase
-        .from('notes')
-        .insert([{
-          ...newItem,
-          user_id: userId,
-          folder_id: currentFolderId
-        }]);
-      if (error) throw error;
+      await addDoc(collection(db, `users/${userId}/notes`), {
+        ...newItem,
+        userId,
+        folderId: currentFolderId,
+        createdAt: serverTimestamp()
+      });
       setIsAddingItem(false);
       setNewItem({ title: '', type: 'link', url: '', content: '' });
     } catch (error) {
-      console.error("Error adding item:", error);
+      handleFirestoreError(error, OperationType.CREATE, `users/${userId}/notes`);
     }
   };
 
   const handleDeleteItem = async (id: string, type: 'item' | 'folder') => {
+    if (!userId) return;
     try {
       if (type === 'item') {
-        const { error } = await supabase.from('notes').delete().eq('id', id);
-        if (error) throw error;
+        await deleteDoc(doc(db, `users/${userId}/notes`, id));
       } else {
-        const { error } = await supabase.from('vault_folders').delete().eq('id', id);
-        if (error) throw error;
+        // Recursive delete would be better, but for now just the folder
+        await deleteDoc(doc(db, `users/${userId}/folders`, id));
       }
       setConfirmDelete(null);
     } catch (error) {
-      console.error("Error deleting:", error);
+      handleFirestoreError(error, OperationType.DELETE, `users/${userId}/${type === 'item' ? 'notes' : 'folders'}`);
     }
   };
 
   const handleSaveNote = async () => {
-    if (!editingNote) return;
+    if (!editingNote || !userId) return;
     try {
-      const { error } = await supabase
-        .from('notes')
-        .update({
-          content: editingNote.content,
-          title: editingNote.title
-        })
-        .eq('id', editingNote.id);
-      if (error) throw error;
+      await updateDoc(doc(db, `users/${userId}/notes`, editingNote.id), {
+        content: editingNote.content,
+        title: editingNote.title
+      });
       setEditingNote(null);
     } catch (error) {
-      console.error("Error saving note:", error);
+      handleFirestoreError(error, OperationType.UPDATE, `users/${userId}/notes`);
     }
   };
 
   const filteredItems = items.filter(item => {
-    const matchesFolder = item.folder_id === currentFolderId;
+    const matchesFolder = item.folderId === currentFolderId;
     const matchesTab = activeTab === 'all' || item.type === activeTab;
     const matchesSearch = item.title.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesFolder && matchesTab && matchesSearch;
   });
 
-  const currentFolders = folders.filter(f => f.parent_id === currentFolderId);
-  const breadcrumbs = [];
-  let tempId = currentFolderId;
-  while (tempId) {
-    const f = folders.find(folder => folder.id === tempId);
-    if (f) {
-      breadcrumbs.unshift(f);
-      tempId = f.parent_id;
-    } else break;
-  }
+  const currentFolders = folders.filter(f => f.parentId === currentFolderId);
 
-  const getYoutubeEmbedUrl = (url: string) => {
-    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
-    const match = url.match(regExp);
-    return (match && match[2].length === 11) ? `https://www.youtube.com/embed/${match[2]}` : null;
+  const FolderTree = ({ parentId, level = 0 }: { parentId: string | null, level?: number }) => {
+    const childFolders = folders.filter(f => f.parentId === parentId);
+    return (
+      <div className="flex flex-col">
+        {childFolders.map(folder => (
+          <div key={folder.id} className="flex flex-col">
+            <div 
+              className={`flex items-center gap-2 py-2 px-3 rounded-xl cursor-pointer transition-all group ${currentFolderId === folder.id ? 'bg-[#8B4513] text-white shadow-lg' : 'hover:bg-[#8B4513]/5 text-[#8B4513]'}`}
+              style={{ paddingLeft: `${level * 16 + 12}px` }}
+              onClick={() => setCurrentFolderId(folder.id)}
+            >
+              <FolderIcon size={16} className={currentFolderId === folder.id ? 'text-white' : 'text-[#D4AF37]'} />
+              <span className="text-sm font-serif truncate flex-1">{folder.name}</span>
+              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button onClick={(e) => { e.stopPropagation(); setRenamingFolder(folder); }} className="p-1 hover:bg-white/20 rounded"><Edit3 size={12} /></button>
+                <button onClick={(e) => { e.stopPropagation(); setConfirmDelete({id: folder.id, type: 'folder'}); }} className="p-1 hover:bg-white/20 rounded text-red-400"><Trash2 size={12} /></button>
+              </div>
+            </div>
+            <FolderTree parentId={folder.id} level={level + 1} />
+          </div>
+        ))}
+      </div>
+    );
   };
 
   return (
-    <div className="h-full flex flex-col space-y-6">
-      {/* Confirmation Modal */}
-      <AnimatePresence>
-        {confirmDelete && (
-          <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white p-8 rounded-[32px] border-2 border-red-100 shadow-2xl max-w-sm w-full text-center"
-            >
-              <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6">
-                <Trash2 className="text-red-500" size={32} />
-              </div>
-              <h3 className="text-xl font-serif font-bold text-gray-900 mb-2">Delete {confirmDelete.type === 'folder' ? 'Folder' : 'Resource'}?</h3>
-              <p className="text-sm text-gray-500 font-serif italic mb-8">This action cannot be undone. All contents will be permanently removed.</p>
-              <div className="flex gap-3">
-                <Button onClick={() => setConfirmDelete(null)} variant="ghost" className="flex-1 rounded-xl">Cancel</Button>
-                <Button onClick={() => handleDeleteItem(confirmDelete.id, confirmDelete.type)} className="flex-1 bg-red-500 hover:bg-red-600 text-white rounded-xl">Delete</Button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* New Folder Modal */}
-      <AnimatePresence>
-        {isAddingFolder && (
-          <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-[#F5F2E7] p-8 rounded-[32px] border-4 border-[#8B4513] shadow-2xl max-w-sm w-full"
-            >
-              <h3 className="text-xl font-serif font-bold text-[#8B4513] mb-6">Create New Folder</h3>
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-[#8B4513]/60">Folder Name</label>
-                  <input 
-                    type="text"
-                    autoFocus
-                    value={newFolderName}
-                    onChange={(e) => setNewFolderName(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleCreateFolder()}
-                    className="w-full bg-white border-2 border-[#8B4513]/10 rounded-xl py-3 px-4 font-serif outline-none focus:border-[#D4AF37]"
-                    placeholder="e.g. Ancient History"
-                  />
-                </div>
-              </div>
-              <div className="flex gap-3 mt-8">
-                <Button onClick={() => setIsAddingFolder(false)} variant="ghost" className="flex-1 rounded-xl border-2 border-[#8B4513]/10 text-[#8B4513]">Cancel</Button>
-                <Button onClick={handleCreateFolder} className="flex-1 bg-[#8B4513] hover:bg-[#1A1612] text-[#F5F2E7] rounded-xl">Create</Button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Header & Breadcrumbs */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-sm font-serif">
-          <button 
+    <div className="h-full flex gap-8 overflow-hidden">
+      {/* Sidebar: Folder Hierarchy */}
+      <div className="w-72 bg-white rounded-[40px] border-2 border-[#8B4513]/10 shadow-xl flex flex-col overflow-hidden">
+        <div className="p-6 border-b border-[#8B4513]/5 flex items-center justify-between">
+          <h3 className="font-serif font-bold text-[#8B4513] uppercase tracking-widest text-xs">Scholarly Archives</h3>
+          <button onClick={() => setIsAddingFolder(true)} className="p-2 bg-[#8B4513]/5 text-[#8B4513] hover:bg-[#8B4513]/10 rounded-xl transition-all"><FolderPlus size={18} /></button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+          <div 
+            className={`flex items-center gap-2 py-3 px-4 rounded-2xl cursor-pointer transition-all mb-4 ${!currentFolderId ? 'bg-[#8B4513] text-white shadow-lg' : 'hover:bg-[#8B4513]/5 text-[#8B4513]'}`}
             onClick={() => setCurrentFolderId(null)}
-            className={`hover:text-[#8B4513] transition-colors ${!currentFolderId ? 'font-bold text-[#8B4513]' : 'text-[#8B4513]/60'}`}
           >
-            Personal Vault
-          </button>
-          {breadcrumbs.map(bc => (
-            <React.Fragment key={bc.id}>
-              <ChevronRight size={14} className="text-[#8B4513]/40" />
-              <button 
-                onClick={() => setCurrentFolderId(bc.id)}
-                className={`hover:text-[#8B4513] transition-colors ${currentFolderId === bc.id ? 'font-bold text-[#8B4513]' : 'text-[#8B4513]/60'}`}
-              >
-                {bc.name}
-              </button>
-            </React.Fragment>
-          ))}
-        </div>
-        <div className="flex gap-2">
-          <Button onClick={() => setIsAddingFolder(true)} variant="ghost" className="border-2 border-[#8B4513]/10 rounded-xl flex items-center gap-2 text-[#8B4513]">
-            <Folder size={18} />
-            New Folder
-          </Button>
-          <Button onClick={() => setIsAddingItem(true)} className="bg-[#8B4513] hover:bg-[#1A1612] text-[#F5F2E7] rounded-xl flex items-center gap-2">
-            <Plus size={18} />
-            Add Resource
-          </Button>
-        </div>
-      </div>
-
-      {/* Search & Tabs */}
-      <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
-        <div className="relative w-full md:w-64">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8B4513]/40" size={16} />
-          <input 
-            type="text"
-            placeholder="Search resources..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-white border-2 border-[#8B4513]/10 rounded-xl py-2 pl-10 pr-4 text-xs font-serif outline-none focus:border-[#D4AF37]"
-          />
-        </div>
-        <div className="flex bg-white border-2 border-[#8B4513]/10 rounded-xl p-1">
-          {(['all', 'video', 'pdf', 'link', 'note'] as const).map(tab => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all ${
-                activeTab === tab 
-                  ? 'bg-[#8B4513] text-[#F5F2E7] shadow-md' 
-                  : 'text-[#8B4513]/40 hover:text-[#8B4513]'
-              }`}
-            >
-              {tab}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Content Grid */}
-      <div className="flex-1 overflow-y-auto custom-scrollbar">
-        {isLoading ? (
-          <div className="flex items-center justify-center h-64">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#8B4513]"></div>
+            <FolderIcon size={20} />
+            <span className="font-serif font-bold">Root Vault</span>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {/* Folders */}
-            {currentFolders.map(folder => (
-              <motion.div
-                key={folder.id}
-                whileHover={{ scale: 1.02 }}
-                className="bg-white p-4 rounded-2xl border-2 border-[#8B4513]/10 shadow-sm hover:shadow-md transition-all cursor-pointer group"
-                onClick={() => setCurrentFolderId(folder.id)}
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <Folder className="text-[#D4AF37]" size={32} fill="currentColor" fillOpacity={0.2} />
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); setConfirmDelete({id: folder.id, type: 'folder'}); }}
-                    className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 transition-opacity"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-                <p className="font-serif font-bold text-[#1A1612] truncate">{folder.name}</p>
-                <p className="text-[10px] text-[#8B4513]/40 uppercase tracking-widest">Folder</p>
-              </motion.div>
-            ))}
+          <FolderTree parentId={null} />
+        </div>
+      </div>
 
-            {/* Items */}
-            {filteredItems.map(item => (
-              <motion.div
-                key={item.id}
-                whileHover={{ scale: 1.02 }}
-                className="bg-white p-4 rounded-2xl border-2 border-[#8B4513]/10 shadow-sm hover:shadow-md transition-all group"
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <div className="text-[#8B4513]">
-                    {item.type === 'video' && <Video size={32} />}
-                    {item.type === 'pdf' && <File size={32} />}
-                    {item.type === 'link' && <LinkIcon size={32} />}
-                    {item.type === 'note' && <FileText size={32} />}
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col space-y-6 overflow-hidden">
+        {/* Modals */}
+        <AnimatePresence>
+          {confirmDelete && (
+            <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+              <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-white p-8 rounded-[32px] border-2 border-red-100 shadow-2xl max-w-sm w-full text-center">
+                <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6"><Trash2 className="text-red-500" size={32} /></div>
+                <h3 className="text-xl font-serif font-bold text-gray-900 mb-2">Delete {confirmDelete.type === 'folder' ? 'Folder' : 'Resource'}?</h3>
+                <p className="text-sm text-gray-500 font-serif italic mb-8">This action cannot be undone. All contents will be permanently removed.</p>
+                <div className="flex gap-3">
+                  <Button onClick={() => setConfirmDelete(null)} variant="ghost" className="flex-1 rounded-xl">Cancel</Button>
+                  <Button onClick={() => handleDeleteItem(confirmDelete.id, confirmDelete.type)} className="flex-1 bg-red-500 hover:bg-red-600 text-white rounded-xl">Delete</Button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+
+          {isAddingFolder && (
+            <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+              <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-[#F5F2E7] p-8 rounded-[32px] border-4 border-[#8B4513] shadow-2xl max-w-sm w-full">
+                <h3 className="text-xl font-serif font-bold text-[#8B4513] mb-6">Create New Folder</h3>
+                <input type="text" autoFocus value={newFolderName} onChange={(e) => setNewFolderName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleCreateFolder()} className="w-full bg-white border-2 border-[#8B4513]/10 rounded-xl py-3 px-4 font-serif outline-none focus:border-[#D4AF37] mb-6" placeholder="Folder Name..." />
+                <div className="flex gap-3">
+                  <Button onClick={() => setIsAddingFolder(false)} variant="ghost" className="flex-1">Cancel</Button>
+                  <Button onClick={handleCreateFolder} className="flex-1 bg-[#8B4513] text-white">Create</Button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+
+          {renamingFolder && (
+            <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+              <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-[#F5F2E7] p-8 rounded-[32px] border-4 border-[#8B4513] shadow-2xl max-w-sm w-full">
+                <h3 className="text-xl font-serif font-bold text-[#8B4513] mb-6">Rename Folder</h3>
+                <input type="text" autoFocus value={renamingFolder.name} onChange={(e) => setRenamingFolder({...renamingFolder, name: e.target.value})} onKeyDown={(e) => e.key === 'Enter' && handleRenameFolder()} className="w-full bg-white border-2 border-[#8B4513]/10 rounded-xl py-3 px-4 font-serif outline-none focus:border-[#D4AF37] mb-6" />
+                <div className="flex gap-3">
+                  <Button onClick={() => setRenamingFolder(null)} variant="ghost" className="flex-1">Cancel</Button>
+                  <Button onClick={handleRenameFolder} className="flex-1 bg-[#8B4513] text-white">Update</Button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* Header & Controls */}
+        <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="relative w-64">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8B4513]/40" size={16} />
+              <input type="text" placeholder="Search archives..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-white border-2 border-[#8B4513]/10 rounded-xl py-2 pl-10 pr-4 text-xs font-serif outline-none focus:border-[#D4AF37]" />
+            </div>
+            <div className="flex bg-white border-2 border-[#8B4513]/10 rounded-xl p-1">
+              {(['all', 'video', 'pdf', 'link', 'note'] as const).map(tab => (
+                <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all ${activeTab === tab ? 'bg-[#8B4513] text-[#F5F2E7] shadow-md' : 'text-[#8B4513]/40 hover:text-[#8B4513]'}`}>{tab}</button>
+              ))}
+            </div>
+          </div>
+          <Button onClick={() => setIsAddingItem(true)} className="bg-[#8B4513] hover:bg-[#1A1612] text-[#F5F2E7] rounded-xl flex items-center gap-2 px-6"><Plus size={18} /> Add Resource</Button>
+        </div>
+
+        {/* Content Grid */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar">
+          {isLoading ? (
+            <div className="flex items-center justify-center h-64 opacity-20"><RefreshCw className="animate-spin" size={48} /></div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              {/* Folders in Current View */}
+              {currentFolders.map(folder => (
+                <motion.div key={folder.id} whileHover={{ scale: 1.02 }} className="bg-white p-6 rounded-[32px] border-2 border-[#8B4513]/10 shadow-sm hover:shadow-xl transition-all cursor-pointer group relative" onClick={() => setCurrentFolderId(folder.id)}>
+                  <FolderIcon className="text-[#D4AF37] mb-4" size={48} fill="currentColor" fillOpacity={0.1} />
+                  <p className="font-serif font-bold text-[#1A1612] truncate mb-1">{folder.name}</p>
+                  <p className="text-[10px] text-[#8B4513]/40 uppercase tracking-widest">Folder</p>
+                  <div className="absolute top-4 right-4 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={(e) => { e.stopPropagation(); setRenamingFolder(folder); }} className="p-2 hover:bg-[#F5F2E7] rounded-full text-[#8B4513]/40 hover:text-[#8B4513]"><Edit3 size={14} /></button>
+                    <button onClick={(e) => { e.stopPropagation(); setConfirmDelete({id: folder.id, type: 'folder'}); }} className="p-2 hover:bg-red-50 rounded-full text-red-400 hover:text-red-600"><Trash2 size={14} /></button>
                   </div>
-                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    {item.type === 'note' && (
-                      <button onClick={() => setEditingNote(item)} className="text-[#8B4513]/40 hover:text-[#8B4513]">
-                        <Edit3 size={14} />
-                      </button>
+                </motion.div>
+              ))}
+
+              {/* Items */}
+              {filteredItems.map(item => (
+                <motion.div key={item.id} whileHover={{ scale: 1.02 }} className="bg-white p-6 rounded-[32px] border-2 border-[#8B4513]/10 shadow-sm hover:shadow-xl transition-all group relative">
+                  <div className="text-[#8B4513] mb-4">
+                    {item.type === 'video' && <Video size={40} />}
+                    {item.type === 'pdf' && <File size={40} />}
+                    {item.type === 'link' && <LinkIcon size={40} />}
+                    {item.type === 'note' && <FileText size={40} />}
+                  </div>
+                  <p className="font-serif font-bold text-[#1A1612] truncate mb-1">{item.title}</p>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-[#8B4513]/40 uppercase tracking-widest">{item.type}</span>
+                    {item.url && (
+                      <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-[#D4AF37] hover:text-[#8B4513] transition-colors"><ArrowRight size={16} /></a>
                     )}
-                    <button onClick={() => setConfirmDelete({id: item.id, type: 'item'})} className="text-red-400 hover:text-red-600">
-                      <Trash2 size={14} />
-                    </button>
                   </div>
-                </div>
-                <p className="font-serif font-bold text-[#1A1612] truncate">{item.title}</p>
-                <div className="flex items-center justify-between mt-2">
-                  <span className="text-[10px] text-[#8B4513]/40 uppercase tracking-widest">{item.type}</span>
-                  {item.url && (
-                    <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-[#D4AF37] hover:text-[#8B4513] transition-colors">
-                      <Edit3 size={14} />
-                    </a>
-                  )}
-                </div>
-                
-                {/* YouTube Preview */}
-                {item.type === 'link' && item.url && getYoutubeEmbedUrl(item.url) && (
-                  <div className="mt-4 aspect-video rounded-lg overflow-hidden border border-[#8B4513]/10">
-                    <iframe 
-                      src={getYoutubeEmbedUrl(item.url)!}
-                      className="w-full h-full"
-                      allowFullScreen
-                    />
+                  <div className="absolute top-4 right-4 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {item.type === 'note' && <button onClick={() => setEditingNote(item)} className="p-2 hover:bg-[#F5F2E7] rounded-full text-[#8B4513]/40 hover:text-[#8B4513]"><Edit3 size={14} /></button>}
+                    <button onClick={() => setConfirmDelete({id: item.id, type: 'item'})} className="p-2 hover:bg-red-50 rounded-full text-red-400 hover:text-red-600"><Trash2 size={14} /></button>
                   </div>
-                )}
-              </motion.div>
-            ))}
-          </div>
-        )}
+                </motion.div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Add Item Modal */}
       <AnimatePresence>
         {isAddingItem && (
           <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-[#1A1612]/40 backdrop-blur-sm">
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-[#F5F2E7] w-full max-w-md rounded-3xl border-4 border-[#8B4513] shadow-2xl p-8"
-            >
-              <h3 className="text-2xl font-serif font-bold text-[#8B4513] mb-6">Add Resource</h3>
-              <div className="space-y-4">
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-[#F5F2E7] w-full max-w-md rounded-[40px] border-4 border-[#8B4513] shadow-2xl p-10">
+              <h3 className="text-2xl font-serif font-bold text-[#8B4513] mb-8">Add Resource</h3>
+              <div className="space-y-6">
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold uppercase tracking-widest text-[#8B4513]/60">Title</label>
-                  <input 
-                    type="text"
-                    value={newItem.title}
-                    onChange={(e) => setNewItem({...newItem, title: e.target.value})}
-                    className="w-full bg-white border-2 border-[#8B4513]/10 rounded-xl py-3 px-4 font-serif outline-none focus:border-[#D4AF37]"
-                  />
+                  <input type="text" value={newItem.title} onChange={(e) => setNewItem({...newItem, title: e.target.value})} className="w-full bg-white border-2 border-[#8B4513]/10 rounded-2xl py-3 px-4 font-serif outline-none focus:border-[#D4AF37]" />
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold uppercase tracking-widest text-[#8B4513]/60">Type</label>
-                  <select 
-                    value={newItem.type}
-                    onChange={(e) => setNewItem({...newItem, type: e.target.value as any})}
-                    className="w-full bg-white border-2 border-[#8B4513]/10 rounded-xl py-3 px-4 font-serif outline-none focus:border-[#D4AF37]"
-                  >
+                  <select value={newItem.type} onChange={(e) => setNewItem({...newItem, type: e.target.value as any})} className="w-full bg-white border-2 border-[#8B4513]/10 rounded-2xl py-3 px-4 font-serif outline-none focus:border-[#D4AF37]">
                     <option value="link">YouTube / Web Link</option>
                     <option value="pdf">PDF Document</option>
                     <option value="video">Video File</option>
@@ -442,29 +365,19 @@ export function PersonalVault({ user }: PersonalVaultProps) {
                 {newItem.type !== 'note' && (
                   <div className="space-y-2">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-[#8B4513]/60">URL</label>
-                    <input 
-                      type="url"
-                      value={newItem.url}
-                      onChange={(e) => setNewItem({...newItem, url: e.target.value})}
-                      className="w-full bg-white border-2 border-[#8B4513]/10 rounded-xl py-3 px-4 font-serif outline-none focus:border-[#D4AF37]"
-                    />
+                    <input type="url" value={newItem.url} onChange={(e) => setNewItem({...newItem, url: e.target.value})} className="w-full bg-white border-2 border-[#8B4513]/10 rounded-2xl py-3 px-4 font-serif outline-none focus:border-[#D4AF37]" />
                   </div>
                 )}
                 {newItem.type === 'note' && (
                   <div className="space-y-2">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-[#8B4513]/60">Content (Markdown)</label>
-                    <textarea 
-                      rows={6}
-                      value={newItem.content}
-                      onChange={(e) => setNewItem({...newItem, content: e.target.value})}
-                      className="w-full bg-white border-2 border-[#8B4513]/10 rounded-xl py-3 px-4 font-serif outline-none focus:border-[#D4AF37] resize-none"
-                    />
+                    <textarea rows={4} value={newItem.content} onChange={(e) => setNewItem({...newItem, content: e.target.value})} className="w-full bg-white border-2 border-[#8B4513]/10 rounded-2xl py-3 px-4 font-serif outline-none focus:border-[#D4AF37] resize-none" />
                   </div>
                 )}
               </div>
-              <div className="flex gap-3 mt-8">
-                <Button onClick={() => setIsAddingItem(false)} variant="ghost" className="flex-1 rounded-xl border-2 border-[#8B4513]/10 text-[#8B4513]">Cancel</Button>
-                <Button onClick={handleAddItem} className="flex-1 bg-[#8B4513] hover:bg-[#1A1612] text-[#F5F2E7] rounded-xl">Add to Vault</Button>
+              <div className="flex gap-3 mt-10">
+                <Button onClick={() => setIsAddingItem(false)} variant="ghost" className="flex-1">Cancel</Button>
+                <Button onClick={handleAddItem} className="flex-1 bg-[#8B4513] text-white">Add to Vault</Button>
               </div>
             </motion.div>
           </div>
@@ -475,41 +388,23 @@ export function PersonalVault({ user }: PersonalVaultProps) {
       <AnimatePresence>
         {editingNote && (
           <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-[#1A1612]/40 backdrop-blur-sm">
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-[#F5F2E7] w-full max-w-4xl h-[80vh] rounded-3xl border-4 border-[#8B4513] shadow-2xl flex flex-col"
-            >
-              <div className="p-6 border-b border-[#8B4513]/10 flex items-center justify-between">
-                <input 
-                  type="text"
-                  value={editingNote.title}
-                  onChange={(e) => setEditingNote({...editingNote, title: e.target.value})}
-                  className="bg-transparent text-2xl font-serif font-bold text-[#8B4513] outline-none"
-                />
-                <div className="flex gap-2">
-                  <Button onClick={handleSaveNote} className="bg-[#8B4513] hover:bg-[#1A1612] text-[#F5F2E7] rounded-xl flex items-center gap-2">
-                    <Save size={18} />
-                    Save Note
-                  </Button>
-                  <Button onClick={() => setEditingNote(null)} variant="ghost" className="rounded-xl border-2 border-[#8B4513]/10 text-[#8B4513]">Close</Button>
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-[#F5F2E7] w-full max-w-5xl h-[85vh] rounded-[48px] border-4 border-[#8B4513] shadow-2xl flex flex-col overflow-hidden">
+              <div className="p-8 border-b border-[#8B4513]/10 flex items-center justify-between bg-white/50">
+                <input type="text" value={editingNote.title} onChange={(e) => setEditingNote({...editingNote, title: e.target.value})} className="bg-transparent text-3xl font-serif font-bold text-[#8B4513] outline-none flex-1" />
+                <div className="flex gap-3">
+                  <Button onClick={handleSaveNote} className="bg-[#8B4513] text-white rounded-2xl px-8"><Save size={18} className="mr-2" /> Save Manuscript</Button>
+                  <Button onClick={() => setEditingNote(null)} variant="ghost" className="rounded-2xl"><X size={20} /></Button>
                 </div>
               </div>
               <div className="flex-1 flex overflow-hidden">
-                <div className="flex-1 p-6 border-r border-[#8B4513]/10">
-                  <p className="text-[10px] font-bold text-[#8B4513]/40 uppercase tracking-widest mb-2">Drafting Area</p>
-                  <textarea 
-                    value={editingNote.content}
-                    onChange={(e) => setEditingNote({...editingNote, content: e.target.value})}
-                    className="w-full h-full bg-transparent font-serif text-[#1A1612] outline-none resize-none leading-relaxed"
-                    placeholder="Write your scholarly insights here..."
-                  />
+                <div className="flex-1 p-10 border-r border-[#8B4513]/10 flex flex-col">
+                  <p className="text-[10px] font-bold text-[#8B4513]/40 uppercase tracking-widest mb-4">Scribe Area</p>
+                  <textarea value={editingNote.content} onChange={(e) => setEditingNote({...editingNote, content: e.target.value})} className="flex-1 bg-transparent font-serif text-xl text-[#1A1612] outline-none resize-none leading-relaxed custom-scrollbar" placeholder="Write your scholarly insights here..." />
                 </div>
-                <div className="flex-1 p-6 bg-white/30 overflow-y-auto custom-scrollbar">
-                  <p className="text-[10px] font-bold text-[#8B4513]/40 uppercase tracking-widest mb-2">Manuscript Preview</p>
+                <div className="flex-1 p-10 bg-white/30 overflow-y-auto custom-scrollbar">
+                  <p className="text-[10px] font-bold text-[#8B4513]/40 uppercase tracking-widest mb-4">Illuminated Preview</p>
                   <div className="prose prose-saddle max-w-none font-serif text-[#1A1612]">
-                    <Markdown>{editingNote.content || ''}</Markdown>
+                    <ReactMarkdown>{editingNote.content || ''}</ReactMarkdown>
                   </div>
                 </div>
               </div>

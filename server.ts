@@ -119,62 +119,78 @@ const syncNews = async () => {
 
   for (const source of sources) {
     try {
-      const feed = await parser.parseURL(source.url);
+      console.log(`Fetching feed from ${source.name}...`);
+      const response = await axios.get(source.url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+          'Accept': 'application/rss+xml, application/xml, text/xml, */*'
+        },
+        timeout: 10000
+      });
+      
+      const feed = await parser.parseString(response.data);
       const items = feed.items.slice(0, 3);
+      console.log(`Processing ${items.length} items from ${source.name}`);
 
       for (const item of items) {
-        const prompt = `
-          As an expert UPSC (Civil Services Examination) mentor, analyze and summarize this news article for an aspirant.
-          
-          Article Title: ${item.title}
-          Article Content: ${item.contentSnippet || item.content}
-          
-          Your task:
-          1. Categorize it by GS Paper (GS I: History/Geography/Society, GS II: Polity/Governance/IR, GS III: Economy/Env/S&T/Security, GS IV: Ethics).
-          2. Provide a concise summary (2-3 sentences) focusing on the "Why it matters for UPSC" aspect.
-          3. Extract 3-4 key "Prelims Facts" (names, dates, locations, organizations).
-          4. Provide a brief "Mains Analysis" point (context, challenges, or way forward).
-          
-          Format the response as STRICT JSON:
-          {
-            "gsPaper": "GS II",
-            "summary": "...",
-            "prelimsFacts": ["...", "..."],
-            "mainsAnalysis": "...",
-            "relevance": "Polity & Governance"
-          }
-        `;
+        try {
+          const prompt = `
+            As an expert UPSC (Civil Services Examination) mentor, analyze and summarize this news article for an aspirant.
+            
+            Article Title: ${item.title}
+            Article Content: ${item.contentSnippet || item.content || item.title}
+            
+            Your task:
+            1. Categorize it by GS Paper (GS I: History/Geography/Society, GS II: Polity/Governance/IR, GS III: Economy/Env/S&T/Security, GS IV: Ethics).
+            2. Provide a concise summary (2-3 sentences) focusing on the "Why it matters for UPSC" aspect.
+            3. Extract 3-4 key "Prelims Facts" (names, dates, locations, organizations).
+            4. Provide a brief "Mains Analysis" point (context, challenges, or way forward).
+            
+            Format the response as STRICT JSON:
+            {
+              "gsPaper": "GS II",
+              "summary": "...",
+              "prelimsFacts": ["...", "..."],
+              "mainsAnalysis": "...",
+              "relevance": "Polity & Governance"
+            }
+          `;
 
-        const aiResult = await genAI.models.generateContent({
-          model: "gemini-3-flash-preview",
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          config: { responseMimeType: "application/json" }
-        });
-        
-        const text = aiResult.text;
-        if (!text) continue;
-        
-        // Sanitize JSON string in case AI wraps it in markdown blocks
-        const jsonStr = text.replace(/```json\n?|```/g, '').trim();
-        const aiData = JSON.parse(jsonStr);
+          const aiResult = await genAI.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            config: { responseMimeType: "application/json" }
+          });
+          
+          const text = aiResult.text;
+          if (!text) continue;
+          
+          const jsonStr = text.replace(/```json\n?|```/g, '').trim();
+          const aiData = JSON.parse(jsonStr);
 
-        if (db) {
-          const existing = await db.collection("newsArticles").where("title", "==", item.title).get();
-          if (existing.empty) {
-            await db.collection("newsArticles").add({
-              title: item.title,
-              source: source.name,
-              url: item.link,
-              date: new Date().toISOString().split('T')[0],
-              createdAt: new Date().toISOString(),
-              ...aiData
-            });
-            processedCount++;
+          if (db) {
+            const existing = await db.collection("newsArticles").where("title", "==", item.title).get();
+            if (existing.empty) {
+              await db.collection("newsArticles").add({
+                title: item.title,
+                source: source.name,
+                url: item.link,
+                date: new Date().toISOString().split('T')[0],
+                createdAt: new Date().toISOString(),
+                ...aiData
+              });
+              processedCount++;
+            }
           }
+        } catch (itemErr) {
+          console.error(`Error processing item "${item.title}" from ${source.name}:`, itemErr);
         }
       }
-    } catch (err) {
-      console.error(`Failed to process source ${source.name}:`, err);
+    } catch (err: any) {
+      console.error(`Failed to process source ${source.name}:`, err.message || err);
+      if (err.response) {
+        console.error(`Response status: ${err.response.status}`);
+      }
     }
   }
 

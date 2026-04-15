@@ -1,6 +1,6 @@
 {
-  "name": "Imperial Scholar: UPSC ",
-  "description": "A world-class study companion for UPSC aspirants with a vintage aesthetic, AI mentoring, and strategic mapping tools.",
+  "name": "Imperial Scholar: UPSC",
+  "description": "A premium UPSC workspace featuring the Imperial Log Book (Journal, Sheet, Canvas), AI-powered news analysis, and a hierarchical Personal Vault for scholarly archives.",
   "requestFramePermissions": [
     "geolocation"
   ]
