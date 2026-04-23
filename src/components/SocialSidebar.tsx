@@ -6,9 +6,9 @@ export function SocialSidebar() {
   const [isOpen, setIsOpen] = useState(false);
 
   const socialLinks = [
-    { icon: <Send size={18} />, label: 'Telegram', href: 'https://t.me/imperialscholar', color: 'bg-[#229ED9]' },
-    { icon: <Instagram size={18} />, label: 'Instagram', href: 'https://instagram.com/imperialscholar', color: 'bg-gradient-to-tr from-[#f9ce34] via-[#ee2a7b] to-[#6228d7]' },
-    { icon: <MessageCircle size={18} />, label: 'WhatsApp', href: 'https://wa.me/919876543210', color: 'bg-[#25D366]' },
+    { icon: <Send size={18} />, label: 'Telegram', href: '#', color: 'bg-[#229ED9]' },
+    { icon: <Instagram size={18} />, label: 'Instagram', href: '#', color: 'bg-gradient-to-tr from-[#f9ce34] via-[#ee2a7b] to-[#6228d7]' },
+    { icon: <MessageCircle size={18} />, label: 'WhatsApp', href: '#', color: 'bg-[#25D366]' },
   ];
 
   return (

@@ -90,8 +90,6 @@ export default function App() {
       const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (session?.user) {
           const sUser = session.user;
-          setUser(sUser);
-          setLoading(false);
           
           // Hybrid Auth: Get Firebase custom token for the Supabase user
           try {
@@ -112,7 +110,7 @@ export default function App() {
               await signInWithCustomToken(auth, token);
               console.log("Hybrid Auth: Firebase session established for Supabase user");
 
-              // Sync user to Firestore client-side now that we have a Firebase session
+              // Sync user to Firestore
               try {
                 const userRef = doc(db, 'users', sUser.id);
                 const publicRef = doc(db, 'publicProfiles', sUser.id);
@@ -138,6 +136,9 @@ export default function App() {
             }
           } catch (error) {
             console.error("Hybrid Auth Error:", error);
+          } finally {
+            setUser(sUser);
+            setLoading(false);
           }
         } else {
           setupFirebaseListener();

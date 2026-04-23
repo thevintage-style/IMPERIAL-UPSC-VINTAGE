@@ -7,6 +7,20 @@ import { Search, Navigation, Info, Sparkles, MapPin, Compass, Layers, Wind, Drop
 import { Button } from './ui/button';
 import { GoogleGenAI } from '@google/genai';
 import { motion, AnimatePresence } from 'motion/react';
+import { 
+  collection, 
+  query, 
+  where, 
+  orderBy, 
+  onSnapshot, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  doc, 
+  serverTimestamp,
+  getDocs
+} from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { supabase } from '../lib/supabase';
 import ReactMarkdown from 'react-markdown';
 
@@ -23,10 +37,21 @@ const createVintageIcon = (color: string) => L.divIcon({
 });
 
 const VintageIcon = createVintageIcon('#8B4513');
+const SavedMarkerIcon = createVintageIcon('#D4AF37');
+const SelectedIcon = createVintageIcon('#A52A2A');
 L.Marker.prototype.options.icon = VintageIcon;
 
 interface CartographerProps {
   user: User;
+}
+
+interface CustomMarker {
+  id: string;
+  lat: number;
+  lon: number;
+  name?: string;
+  annotation?: string;
+  analysis?: string;
 }
 
 const STRATEGIC_POINTS = [
@@ -113,11 +138,42 @@ export function Cartographer({ user }: CartographerProps) {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [activeLayer, setActiveLayer] = useState<'political' | 'physical' | 'rivers' | 'plateaus'>('political');
   const [selectedPoint, setSelectedPoint] = useState<{lat: number, lon: number, name?: string} | null>(null);
+  const [savedMarkers, setSavedMarkers] = useState<CustomMarker[]>([]);
   const [annotation, setAnnotation] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
 
   const userId = (user as any).uid || (user as any).id;
+
+  // Load saved markers from Firestore (Imperial Vault)
+  useEffect(() => {
+    if (!userId) return;
+    const fetchMarkers = async () => {
+      try {
+        const q = query(
+          collection(db, `users/${userId}/notes`),
+          where('type', '==', 'map_marker'),
+          orderBy('createdAt', 'desc')
+        );
+        const querySnapshot = await getDocs(q);
+        const markers = querySnapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            lat: data.lat,
+            lon: data.lon,
+            name: data.title.replace('Strategic Point: ', ''),
+            annotation: data.annotation,
+            analysis: data.content
+          } as CustomMarker;
+        });
+        setSavedMarkers(markers);
+      } catch (error) {
+        console.error("Error fetching map archives:", error);
+      }
+    };
+    fetchMarkers();
+  }, [userId]);
 
   const handleSearch = async () => {
     if (!searchQuery) return;
@@ -192,31 +248,34 @@ export function Cartographer({ user }: CartographerProps) {
     setIsSaving(true);
     setSaveStatus('saving');
     try {
-      const content = `
-### Location: ${selectedPoint.name || 'Custom Point'}
-**Coordinates:** ${selectedPoint.lat.toFixed(4)}, ${selectedPoint.lon.toFixed(4)}
+      const markerName = selectedPoint.name || `Point ${selectedPoint.lat.toFixed(2)}, ${selectedPoint.lon.toFixed(2)}`;
+      
+      const markerData = {
+        title: `Strategic Point: ${markerName}`,
+        type: 'map_marker',
+        lat: selectedPoint.lat,
+        lon: selectedPoint.lon,
+        annotation: annotation,
+        content: analysis || 'No analysis available.',
+        createdAt: serverTimestamp(),
+        userId: userId
+      };
 
-**Personal Annotation:**
-${annotation || 'No annotation provided.'}
+      const docRef = await addDoc(collection(db, `users/${userId}/notes`), markerData);
 
-**AI Strategic Analysis:**
-${analysis || 'No analysis fetched yet.'}
-      `.trim();
+      setSavedMarkers(prev => [{
+        id: docRef.id,
+        lat: selectedPoint.lat,
+        lon: selectedPoint.lon,
+        name: markerName,
+        annotation: annotation,
+        analysis: analysis || ''
+      }, ...prev]);
 
-      const { error } = await supabase
-        .from('notes')
-        .insert([{
-          user_id: userId,
-          title: `Map Annotation: ${selectedPoint.name || `${selectedPoint.lat.toFixed(2)}, ${selectedPoint.lon.toFixed(2)}`}`,
-          type: 'note',
-          content: content
-        }]);
-
-      if (error) throw error;
       setSaveStatus('success');
       setTimeout(() => setSaveStatus('idle'), 3000);
     } catch (error) {
-      console.error("Error saving to vault:", error);
+      console.error("Error saving to Imperial Vault:", error);
       setSaveStatus('error');
     } finally {
       setIsSaving(false);
@@ -365,6 +424,7 @@ ${analysis || 'No analysis fetched yet.'}
               <Marker 
                 key={idx} 
                 position={point.coords as [number, number]}
+                {...({ title: `${point.name}\n${point.info}\n${point.upsc}` } as any)}
                 eventHandlers={{
                   click: () => {
                     setCenter(point.coords as [number, number]);
@@ -411,8 +471,42 @@ ${analysis || 'No analysis fetched yet.'}
                 </Popup>
               </Marker>
             ))}
-            {selectedPoint && !STRATEGIC_POINTS.some(p => p.coords[0] === selectedPoint.lat && p.coords[1] === selectedPoint.lon) && (
-              <Marker position={[selectedPoint.lat, selectedPoint.lon]} {...({ icon: createVintageIcon('#D4AF37') } as any)}>
+            {/* Saved Custom Markers */}
+            {savedMarkers.map((marker) => (
+              <Marker 
+                key={marker.id} 
+                position={[marker.lat, marker.lon]} 
+                {...({ icon: SavedMarkerIcon } as any)}
+                eventHandlers={{
+                  click: () => {
+                    setSelectedPoint({ lat: marker.lat, lon: marker.lon, name: marker.name });
+                    setAnnotation(marker.annotation || '');
+                    setAnalysis(marker.analysis || '');
+                  }
+                }}
+              >
+                <Popup>
+                  <div className="font-serif p-2 min-w-[240px] bg-parchment border-2 border-saddle-brown/20 rounded-xl shadow-xl text-leather">
+                    <h4 className="font-bold text-sm border-b border-saddle-brown/10 pb-2 mb-2">Archived Strategic Point</h4>
+                    <p className="text-xs font-bold text-saddle-brown mb-1">{marker.name}</p>
+                    <p className="text-[10px] opacity-60 mb-2 truncate">{marker.annotation}</p>
+                    <button 
+                      onClick={() => {
+                        setSelectedPoint({ lat: marker.lat, lon: marker.lon, name: marker.name });
+                        setAnnotation(marker.annotation || '');
+                        setAnalysis(marker.analysis || '');
+                      }}
+                      className="w-full py-2 bg-antique-gold/20 text-saddle-brown text-[10px] font-bold uppercase rounded-lg"
+                    >
+                      Retrieve Data
+                    </button>
+                  </div>
+                </Popup>
+              </Marker>
+            ))}
+
+            {selectedPoint && !STRATEGIC_POINTS.some(p => p.coords[0] === selectedPoint.lat && p.coords[1] === selectedPoint.lon) && !savedMarkers.some(m => m.lat === selectedPoint.lat && m.lon === selectedPoint.lon) && (
+              <Marker position={[selectedPoint.lat, selectedPoint.lon]} {...({ icon: SelectedIcon } as any)}>
                 <Popup>
                   <div className="font-serif p-2 min-w-[240px] bg-parchment border-2 border-saddle-brown/20 rounded-xl shadow-xl">
                     <h4 className="font-bold text-leather text-sm border-b border-saddle-brown/10 pb-2 mb-2">Custom Strategic Point</h4>

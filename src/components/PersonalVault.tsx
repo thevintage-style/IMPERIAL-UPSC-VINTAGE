@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { User } from 'firebase/auth';
+import { User as FirebaseUser } from 'firebase/auth';
+import { User as SupabaseUser } from '@supabase/supabase-js';
+import { supabase } from '../lib/supabase';
 import { 
   collection, 
   query, 
@@ -11,7 +13,6 @@ import {
   deleteDoc, 
   doc, 
   serverTimestamp,
-  getDocs
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { 
@@ -19,21 +20,18 @@ import {
   FileText, 
   Video, 
   Link as LinkIcon, 
+  MapPin,
   Plus, 
   Trash2, 
-  ChevronRight, 
-  ChevronDown,
-  MoreVertical,
   Edit3,
   Save,
-  Youtube,
   File,
   Search,
-  Clock,
   FolderPlus,
   ArrowRight,
   X,
-  RefreshCw
+  RefreshCw,
+  Upload
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { motion, AnimatePresence } from 'motion/react';
@@ -42,7 +40,7 @@ import ReactMarkdown from 'react-markdown';
 interface VaultItem {
   id: string;
   title: string;
-  type: 'video' | 'pdf' | 'link' | 'note';
+  type: 'video' | 'pdf' | 'link' | 'note' | 'map_marker';
   url?: string;
   content?: string;
   folderId: string | null;
@@ -57,7 +55,7 @@ interface VaultFolder {
 }
 
 interface PersonalVaultProps {
-  user: User;
+  user: FirebaseUser | SupabaseUser;
 }
 
 export function PersonalVault({ user }: PersonalVaultProps) {
@@ -73,10 +71,49 @@ export function PersonalVault({ user }: PersonalVaultProps) {
 
   const [isAddingFolder, setIsAddingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
+  const [newFolderParentId, setNewFolderParentId] = useState<string | null>(null);
   const [renamingFolder, setRenamingFolder] = useState<VaultFolder | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{id: string, type: 'item' | 'folder'} | null>(null);
 
-  const userId = user?.uid;
+  const [isUploading, setIsUploading] = useState(false);
+  const userId = (user as any).uid || (user as any).id;
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !userId) return;
+
+    setIsUploading(true);
+    try {
+      const fileName = `${Date.now()}-${file.name}`;
+      const filePath = `${userId}/${fileName}`;
+      
+      const { data, error } = await supabase.storage
+        .from('vault')
+        .upload(filePath, file);
+
+      if (error) throw error;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('vault')
+        .getPublicUrl(filePath);
+
+      // Save metadata to Firestore (or Supabase)
+      await addDoc(collection(db, `users/${userId}/notes`), {
+        title: file.name,
+        type: file.type.includes('pdf') ? 'pdf' : file.type.includes('video') ? 'video' : 'pdf',
+        url: publicUrl,
+        userId,
+        folderId: currentFolderId,
+        createdAt: serverTimestamp()
+      });
+
+    } catch (error) {
+      console.error('Upload Error:', error);
+      alert('Failed to upload to the Imperial Vault.');
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   // Real-time Folders
   useEffect(() => {
@@ -115,11 +152,12 @@ export function PersonalVault({ user }: PersonalVaultProps) {
       await addDoc(collection(db, `users/${userId}/folders`), {
         name: newFolderName,
         userId,
-        parentId: currentFolderId,
+        parentId: newFolderParentId,
         createdAt: serverTimestamp()
       });
       setIsAddingFolder(false);
       setNewFolderName('');
+      setNewFolderParentId(null);
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, `users/${userId}/folders`);
     }
@@ -190,6 +228,23 @@ export function PersonalVault({ user }: PersonalVaultProps) {
 
   const currentFolders = folders.filter(f => f.parentId === currentFolderId);
 
+  const breadcrumbs = (() => {
+    const crumbs: { id: string | null, name: string }[] = [{ id: null, name: 'Root Vault' }];
+    if (!currentFolderId) return crumbs;
+
+    const path: { id: string | null, name: string }[] = [];
+    let curr = folderIdToObj(currentFolderId);
+    while (curr) {
+      path.unshift({ id: curr.id, name: curr.name });
+      curr = curr.parentId ? folderIdToObj(curr.parentId) : null;
+    }
+    return [...crumbs, ...path];
+  })();
+
+  function folderIdToObj(id: string) {
+    return folders.find(f => f.id === id);
+  }
+
   const FolderTree = ({ parentId, level = 0 }: { parentId: string | null, level?: number }) => {
     const childFolders = folders.filter(f => f.parentId === parentId);
     return (
@@ -256,11 +311,29 @@ export function PersonalVault({ user }: PersonalVaultProps) {
           {isAddingFolder && (
             <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
               <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-[#F5F2E7] p-8 rounded-[32px] border-4 border-[#8B4513] shadow-2xl max-w-sm w-full">
-                <h3 className="text-xl font-serif font-bold text-[#8B4513] mb-6">Create New Folder</h3>
-                <input type="text" autoFocus value={newFolderName} onChange={(e) => setNewFolderName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleCreateFolder()} className="w-full bg-white border-2 border-[#8B4513]/10 rounded-xl py-3 px-4 font-serif outline-none focus:border-[#D4AF37] mb-6" placeholder="Folder Name..." />
-                <div className="flex gap-3">
-                  <Button onClick={() => setIsAddingFolder(false)} variant="ghost" className="flex-1">Cancel</Button>
-                  <Button onClick={handleCreateFolder} className="flex-1 bg-[#8B4513] text-white">Create</Button>
+                <h3 className="text-xl font-serif font-bold text-[#8B4513] mb-6 text-center">Establish New Archive</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-[#8B4513]/60 mb-2 block text-center">Folder Name</label>
+                    <input type="text" autoFocus value={newFolderName} onChange={(e) => setNewFolderName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleCreateFolder()} className="w-full bg-white border-2 border-[#8B4513]/10 rounded-xl py-3 px-4 font-serif outline-none focus:border-[#D4AF37]" placeholder="Manuscript Title..." />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-[#8B4513]/60 mb-2 block text-center">Parent Registry</label>
+                    <select 
+                      value={newFolderParentId || ''} 
+                      onChange={(e) => setNewFolderParentId(e.target.value || null)}
+                      className="w-full bg-white border-2 border-[#8B4513]/10 rounded-xl py-3 px-4 font-serif outline-none focus:border-[#D4AF37] appearance-none"
+                    >
+                      <option value="">Root Vault</option>
+                      {folders.map(f => (
+                        <option key={f.id} value={f.id}>{f.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="flex gap-3 mt-8">
+                  <Button onClick={() => setIsAddingFolder(false)} variant="ghost" className="flex-1">Discard</Button>
+                  <Button onClick={handleCreateFolder} className="flex-1 bg-[#8B4513] text-white">Consign</Button>
                 </div>
               </motion.div>
             </div>
@@ -281,19 +354,43 @@ export function PersonalVault({ user }: PersonalVaultProps) {
         </AnimatePresence>
 
         {/* Header & Controls */}
-        <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="relative w-64">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8B4513]/40" size={16} />
-              <input type="text" placeholder="Search archives..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-white border-2 border-[#8B4513]/10 rounded-xl py-2 pl-10 pr-4 text-xs font-serif outline-none focus:border-[#D4AF37]" />
+        <div className="flex flex-col gap-6">
+          {/* Breadcrumbs */}
+          <div className="flex items-center gap-2 text-[#8B4513]/60 text-xs font-serif overflow-x-auto whitespace-nowrap pb-1">
+            {breadcrumbs.map((crumb, idx) => (
+              <React.Fragment key={idx}>
+                <button 
+                  onClick={() => setCurrentFolderId(crumb.id)}
+                  className={`hover:text-[#D4AF37] transition-colors ${idx === breadcrumbs.length - 1 ? 'font-bold text-[#8B4513]' : ''}`}
+                >
+                  {crumb.name}
+                </button>
+                {idx < breadcrumbs.length - 1 && <span className="text-[10px]">/</span>}
+              </React.Fragment>
+            ))}
+          </div>
+
+          <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="relative w-64">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8B4513]/40" size={16} />
+                <input type="text" placeholder="Search archives..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-white border-2 border-[#8B4513]/10 rounded-xl py-2 pl-10 pr-4 text-xs font-serif outline-none focus:border-[#D4AF37]" />
+              </div>
+              <div className="flex bg-white border-2 border-[#8B4513]/10 rounded-xl p-1">
+                {(['all', 'video', 'pdf', 'link', 'note'] as const).map(tab => (
+                  <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all ${activeTab === tab ? 'bg-[#8B4513] text-[#F5F2E7] shadow-md' : 'text-[#8B4513]/40 hover:text-[#8B4513]'}`}>{tab}</button>
+                ))}
+              </div>
             </div>
-            <div className="flex bg-white border-2 border-[#8B4513]/10 rounded-xl p-1">
-              {(['all', 'video', 'pdf', 'link', 'note'] as const).map(tab => (
-                <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all ${activeTab === tab ? 'bg-[#8B4513] text-[#F5F2E7] shadow-md' : 'text-[#8B4513]/40 hover:text-[#8B4513]'}`}>{tab}</button>
-              ))}
+            <div className="flex gap-2">
+              <label className="bg-[#8B4513]/5 hover:bg-[#8B4513]/10 text-[#8B4513] rounded-xl flex items-center gap-2 px-6 py-2 cursor-pointer transition-all">
+                <Upload size={18} />
+                <span className="font-bold text-sm">{isUploading ? 'Sealing...' : 'Upload File'}</span>
+                <input type="file" className="hidden" onChange={handleFileUpload} disabled={isUploading} />
+              </label>
+              <Button onClick={() => setIsAddingItem(true)} className="bg-[#8B4513] hover:bg-[#1A1612] text-[#F5F2E7] rounded-xl flex items-center gap-2 px-6"><Plus size={18} /> Add Meta</Button>
             </div>
           </div>
-          <Button onClick={() => setIsAddingItem(true)} className="bg-[#8B4513] hover:bg-[#1A1612] text-[#F5F2E7] rounded-xl flex items-center gap-2 px-6"><Plus size={18} /> Add Resource</Button>
         </div>
 
         {/* Content Grid */}
@@ -323,6 +420,7 @@ export function PersonalVault({ user }: PersonalVaultProps) {
                     {item.type === 'pdf' && <File size={40} />}
                     {item.type === 'link' && <LinkIcon size={40} />}
                     {item.type === 'note' && <FileText size={40} />}
+                    {item.type === 'map_marker' && <MapPin size={40} />}
                   </div>
                   <p className="font-serif font-bold text-[#1A1612] truncate mb-1">{item.title}</p>
                   <div className="flex items-center justify-between">
@@ -332,7 +430,7 @@ export function PersonalVault({ user }: PersonalVaultProps) {
                     )}
                   </div>
                   <div className="absolute top-4 right-4 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    {item.type === 'note' && <button onClick={() => setEditingNote(item)} className="p-2 hover:bg-[#F5F2E7] rounded-full text-[#8B4513]/40 hover:text-[#8B4513]"><Edit3 size={14} /></button>}
+                    {(item.type === 'note' || item.type === 'map_marker') && <button onClick={() => setEditingNote(item)} className="p-2 hover:bg-[#F5F2E7] rounded-full text-[#8B4513]/40 hover:text-[#8B4513]"><Edit3 size={14} /></button>}
                     <button onClick={() => setConfirmDelete({id: item.id, type: 'item'})} className="p-2 hover:bg-red-50 rounded-full text-red-400 hover:text-red-600"><Trash2 size={14} /></button>
                   </div>
                 </motion.div>

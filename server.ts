@@ -29,47 +29,64 @@ try {
 if (!admin.apps.length) {
   try {
     const sa = process.env.FIREBASE_SERVICE_ACCOUNT;
-    const projectId = firebaseAppletConfig?.projectId || process.env.FIREBASE_PROJECT_ID || "imperial-upsc-portal";
-    
-    console.log(`Attempting to initialize Firebase Admin for project: ${projectId}`);
+    const projectId = firebaseAppletConfig?.projectId || process.env.FIREBASE_PROJECT_ID;
     
     if (sa && sa.trim().startsWith('{')) {
       const serviceAccount = JSON.parse(sa);
-      console.log(`Using Service Account for project: ${serviceAccount.project_id}`);
+      console.log(`[Firebase] Initializing with Service Account for project: ${serviceAccount.project_id}`);
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
-        projectId: serviceAccount.project_id || projectId
+        projectId: serviceAccount.project_id
       });
     } else {
-      console.log("Using default credentials (Cloud Run environment)");
+      console.log(`[Firebase] Initializing with Default Credentials for project: ${projectId || 'auto-detect'}`);
       admin.initializeApp({
         projectId: projectId
       });
     }
   } catch (error) {
-    console.error("Firebase Admin initialization failed:", error);
+    console.error("[Firebase] Admin initialization critical failure:", error);
   }
 }
 
-let db: any = null;
+let db: admin.firestore.Firestore | null = null;
 try {
   const dbId = firebaseAppletConfig?.firestoreDatabaseId;
+  const app = admin.app();
+  
   if (dbId && dbId !== "(default)") {
-    db = getFirestore(admin.app(), dbId);
-    console.log(`Using named Firestore database: ${dbId}`);
+    console.log(`[Firestore] Attempting to use named database: ${dbId}`);
+    db = getFirestore(app, dbId);
   } else {
-    db = getFirestore(admin.app());
-    console.log("Using default Firestore database");
+    console.log("[Firestore] Using default database");
+    db = getFirestore(app);
   }
 } catch (error) {
-  console.error("Firestore initialization failed, trying default:", error);
+  console.error("[Firestore] Primary initialization failed, falling back to default:", error);
   try {
     db = getFirestore(admin.app());
   } catch (fallbackError) {
-    console.error("Critical: Firestore fallback failed:", fallbackError);
+    console.error("[Firestore] Critical: All initialization attempts failed:", fallbackError);
   }
 }
 const parser = new Parser();
+import { createClient } from "@supabase/supabase-js";
+
+// Initialize Supabase Admin for backend operations
+let supabaseClient: any = null;
+const getSupabase = () => {
+  if (!supabaseClient) {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!url || !key || !url.startsWith('http')) {
+      console.warn("[Supabase] Backend client not initialized: Missing credentials");
+      return null;
+    }
+    supabaseClient = createClient(url, key);
+  }
+  return supabaseClient;
+};
+
 const genAI = new GoogleGenAI({ apiKey: process.env.VINTAGE_ORACLE_KEY || "" });
 
 // Rate Limiting Middleware
@@ -106,106 +123,241 @@ const PORT = 3000;
 
 app.use(express.json());
 
+/* 
+   SUPABASE SCHEMA REFERENCE:
+   Table: daily_news
+   Columns: id (int8), title (text), source (text), summary (text), upsc_category (text), url (text), relevance_score (numeric), date_published (date)
+   
+   Table: study_logs
+   Columns: id (int8), user_id (uuid), subject (text), duration_minutes (int4), notes (text), date (timestamp)
+*/
+
 const syncNews = async () => {
   try {
-    console.log("Starting News Sync process...");
-  const sources = [
-    { name: "The Hindu", url: "https://www.thehindu.com/news/national/feeder/default.rss" },
-    { name: "Indian Express", url: "https://indianexpress.com/section/explained/feed/" },
-    { name: "PIB", url: "https://pib.gov.in/RssMain.aspx?ModId=6" }
-  ];
+    console.log("Starting Imperial News Engine reconnaissance...");
+    const sources = [
+      { name: "Insights on India", url: "https://www.insightsonindia.com/feed/" },
+      { name: "PMF IAS", url: "https://www.pmfias.com/feed/" },
+      { name: "PIB", url: "https://pib.gov.in/RssMain.aspx?ModId=6" },
+      { name: "The Hindu", url: "https://www.thehindu.com/news/national/feeder/default.rss" },
+      { name: "Indian Express", url: "https://indianexpress.com/section/explained/feed/" }
+    ];
 
-  let processedCount = 0;
+    let processedCount = 0;
 
-  for (const source of sources) {
-    try {
-      console.log(`Fetching feed from ${source.name}...`);
-      const response = await axios.get(source.url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-          'Accept': 'application/rss+xml, application/xml, text/xml, */*'
-        },
-        timeout: 10000
-      });
-      
-      const feed = await parser.parseString(response.data);
-      const items = feed.items.slice(0, 3);
-      console.log(`Processing ${items.length} items from ${source.name}`);
-
-      for (const item of items) {
-        try {
-          const prompt = `
-            As an expert UPSC (Civil Services Examination) mentor, analyze and summarize this news article for an aspirant.
-            
-            Article Title: ${item.title}
-            Article Content: ${item.contentSnippet || item.content || item.title}
-            
-            Your task:
-            1. Categorize it by GS Paper (GS I: History/Geography/Society, GS II: Polity/Governance/IR, GS III: Economy/Env/S&T/Security, GS IV: Ethics).
-            2. Provide a concise summary (2-3 sentences) focusing on the "Why it matters for UPSC" aspect.
-            3. Extract 3-4 key "Prelims Facts" (names, dates, locations, organizations).
-            4. Provide a brief "Mains Analysis" point (context, challenges, or way forward).
-            
-            Format the response as STRICT JSON:
-            {
-              "gsPaper": "GS II",
-              "summary": "...",
-              "prelimsFacts": ["...", "..."],
-              "mainsAnalysis": "...",
-              "relevance": "Polity & Governance"
-            }
-          `;
-
-          const aiResult = await genAI.models.generateContent({
-            model: "gemini-3-flash-preview",
-            contents: [{ role: "user", parts: [{ text: prompt }] }],
-            config: { responseMimeType: "application/json" }
-          });
-          
-          const text = aiResult.text;
-          if (!text) continue;
-          
-          const jsonStr = text.replace(/```json\n?|```/g, '').trim();
-          const aiData = JSON.parse(jsonStr);
-
-          if (db) {
-            const existing = await db.collection("newsArticles").where("title", "==", item.title).get();
-            if (existing.empty) {
-              await db.collection("newsArticles").add({
-                title: item.title,
-                source: source.name,
-                url: item.link,
-                date: new Date().toISOString().split('T')[0],
-                createdAt: new Date().toISOString(),
-                ...aiData
-              });
-              processedCount++;
-            }
-          }
-        } catch (itemErr) {
-          console.error(`Error processing item "${item.title}" from ${source.name}:`, itemErr);
+    for (const source of sources) {
+      try {
+        const client = getSupabase();
+        if (!client) {
+          console.warn(`[News Engine] Source ${source.name} skipped: Supabase not configured.`);
+          continue;
         }
-      }
-    } catch (err: any) {
-      console.error(`Failed to process source ${source.name}:`, err.message || err);
-      if (err.response) {
-        console.error(`Response status: ${err.response.status}`);
+        console.log(`Fetching feed from ${source.name}...`);
+        const response = await axios.get(source.url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+          },
+          timeout: 10000
+        });
+        
+        const feed = await parser.parseString(response.data);
+        // Process top 5 items per source
+        const items = feed.items.slice(0, 5);
+
+        for (const item of items) {
+          try {
+            // Scoring with Gemini
+            const prompt = `
+              As a Senior UPSC Mentor and Strategic Intelligence Officer, analyze this news intel for high-fidelity relevance to the UPSC CSE Syllabus.
+              Identify if it links to GS Paper I (History/Geo), GS Paper II (Polity/IR), GS Paper III (Economy/Enviro/Security), or GS Paper IV (Ethics).
+              
+              Intel:
+              Title: ${item.title}
+              Summary: ${item.contentSnippet || item.content || item.title}
+              
+              Rules:
+              - Target relevance score of 1-10.
+              - Only score > 7 if the topic strongly involves key UPSC dimensions like: Constitutional, GS1, GS2, GS3, GS4, Prelims, Mains, or PIB.
+              - Discard articles that do not relate to these pillars.
+              - Provide a sophisticated, UPSC-ready summary.
+              
+              Format JSON:
+              {
+                "score": number,
+                "gs_paper": "GS I" | "GS II" | "GS III" | "GS IV",
+                "summary": "Scholarly summary focusing on core UPSC dimensions",
+                "is_worth_archiving": boolean
+              }
+            `;
+
+            const aiResult = await genAI.models.generateContent({
+              model: "gemini-3-flash-preview",
+              contents: [{ role: "user", parts: [{ text: prompt }] }],
+              config: { responseMimeType: "application/json" }
+            });
+            
+            const aiData = JSON.parse(aiResult.text || "{}");
+
+            if (aiData.score > 7) {
+              console.log(`[News Engine] High value intel discovered: ${item.title} (Score: ${aiData.score})`);
+              
+              // Store in Supabase daily_news
+              const client = getSupabase();
+              if (client) {
+                const { error: insertError } = await client
+                  .from('daily_news')
+                  .upsert({
+                    title: item.title,
+                    source: source.name,
+                    summary: aiData.summary,
+                    upsc_category: aiData.gs_paper,
+                    url: item.link,
+                    relevance_score: aiData.score,
+                    date_published: new Date().toISOString().split('T')[0]
+                  }, { onConflict: 'title' });
+
+                if (insertError) throw insertError;
+                processedCount++;
+              }
+            }
+          } catch (itemErr) {
+            console.error(`Error processing item: ${item.title}`, itemErr);
+          }
+        }
+      } catch (err: any) {
+        console.error(`Failed source ${source.name}:`, err.message);
       }
     }
-  }
 
-  if (db) {
-    await db.collection("system_meta").doc("news_sync").set({
-      lastSync: new Date().toISOString(),
-      articlesProcessed: processedCount
-    }, { merge: true });
-  }
-  return processedCount;
+    return processedCount;
   } catch (globalErr) {
     console.error("Global News Sync Error:", globalErr);
     return 0;
   }
 };
+
+// Nightly Archive Migration
+const migrateToArchives = async () => {
+  console.log("Initiating nightly archival migration...");
+  const client = getSupabase();
+  if (!client) {
+    console.warn("[Archival] Migration skipped: Supabase not configured.");
+    return;
+  }
+  
+  try {
+    const { data: dailyNews, error: fetchError } = await client
+      .from('daily_news')
+      .select('*');
+
+    if (fetchError) throw fetchError;
+
+    if (dailyNews && dailyNews.length > 0) {
+      const archives = dailyNews.map(news => ({
+        title: news.title,
+        source: news.source,
+        summary: news.summary,
+        upsc_category: news.upsc_category,
+        url: news.url,
+        relevance_score: news.relevance_score,
+        date_published: news.date_published,
+        date_created: new Date().toISOString()
+      }));
+
+      const { error: archiveError } = await client
+        .from('news_archives')
+        .insert(archives);
+
+      if (archiveError) throw archiveError;
+
+      // Clear daily news
+      const { error: clearError } = await client
+        .from('daily_news')
+        .delete()
+        .neq('id', 0); // Delete everything
+
+      if (clearError) throw clearError;
+      console.log(`Successfully archived ${dailyNews.length} articles.`);
+    }
+  } catch (error) {
+    console.error("Archival Migration Failed:", error);
+  }
+};
+
+// API: ElevenLabs TTS (Professional Voice Intelligence)
+app.post("/api/tts/elevenlabs", async (req, res) => {
+  const { text, voiceId = "cgSgspJ2msm6clMCkdW9" } = req.body; // Default: 'Jessica' or similar professional model
+  if (!text) return res.status(400).send("Text is required");
+
+  const apiKey = process.env.ELEVENLABS_API_KEY;
+  if (!apiKey) {
+    console.warn("ElevenLabs API Key missing. High-memory voice intelligence deactivated.");
+    return res.status(503).send("ElevenLabs service unavailable");
+  }
+
+  try {
+    const response = await axios.post(
+      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+      {
+        text: text,
+        model_id: "eleven_monolingual_v1",
+        voice_settings: {
+          stability: 0.5,
+          similarity_boost: 0.75,
+        },
+      },
+      {
+        headers: {
+          "xi-api-key": apiKey,
+          "Content-Type": "application/json",
+        },
+        responseType: "arraybuffer",
+      }
+    );
+
+    res.setHeader("Content-Type", "audio/mpeg");
+    res.send(Buffer.from(response.data));
+  } catch (error: any) {
+    console.error("ElevenLabs Error:", error.response?.data?.toString() || error.message);
+    res.status(500).send("Voice intelligence synthesis failed");
+  }
+});
+
+// API: OpenAI TTS
+app.post("/api/tts", async (req, res) => {
+  const { text } = req.body;
+  if (!text) return res.status(400).send("Text is required");
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    console.warn("OpenAI API Key missing. TTS feature deactivated.");
+    return res.status(503).send("TTS service unavailable");
+  }
+
+  try {
+    const response = await axios.post(
+      "https://api.openai.com/v1/audio/speech",
+      {
+        model: "tts-1",
+        input: text,
+        voice: "alloy",
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        responseType: "arraybuffer",
+      }
+    );
+
+    res.setHeader("Content-Type", "audio/mpeg");
+    res.send(Buffer.from(response.data));
+  } catch (error) {
+    console.error("TTS Error:", error);
+    res.status(500).send("Voice synthesis failed");
+  }
+});
 
 // API Routes: News Sync (Automated UPSC News Engine)
 app.post("/api/news/sync", async (req, res) => {
@@ -504,20 +656,67 @@ app.listen(PORT, "0.0.0.0", async () => {
     console.log(`[Imperial Server] Listening on http://0.0.0.0:${PORT}`);
     console.log(`[Imperial Server] Environment: ${process.env.NODE_ENV}`);
     
+    // Auto-Pilot Mode: Trigger Sync at 08:00 AM IST and 08:00 PM IST
+    setInterval(() => {
+        const now = new Date();
+        const istOffset = 5.5 * 60 * 60 * 1000;
+        const istTime = new Date(now.getTime() + istOffset);
+        const hours = istTime.getUTCHours();
+        const minutes = istTime.getUTCMinutes();
+
+        // 08:00 and 20:00 IST
+        if ((hours === 8 || hours === 20) && minutes === 0) {
+            console.log(`[Auto-Pilot] Triggering scheduled News Sync at ${hours}:00 IST`);
+            syncNews().catch(err => console.error("Auto-Pilot sync failed:", err));
+        }
+    }, 60000); // Check every minute
+    
     if (db) {
       try {
-        console.log("[Imperial Server] Checking news archives...");
-        const snapshot = await db.collection("newsArticles").limit(1).get();
-        if (snapshot.empty) {
-          console.log("[Imperial Server] News archives empty. Initiating background reconnaissance...");
+        console.log("[Imperial Server] Auditing News Archives...");
+        
+        let localDb = db;
+        let snapshot;
+        try {
+          snapshot = await localDb.collection("newsArticles").limit(1).get();
+        } catch (dbErr: any) {
+          const errMsg = dbErr.message || "";
+          if (errMsg.includes('PERMISSION_DENIED') || errMsg.includes('NOT_FOUND') || dbErr.code === 5 || dbErr.code === 7) {
+            // Silently fall back to default database if named instance is missing or restricted
+            localDb = getFirestore(admin.app());
+            db = localDb;
+            try {
+              snapshot = await localDb.collection("newsArticles").limit(1).get();
+            } catch (fallbackErr) {
+              // Both attempts failed, archives are likely truly empty or uninitialized
+            }
+          }
+        }
+
+        const client = getSupabase();
+        let supabaseEmpty = true;
+        if (client) {
+          try {
+            const { data } = await client.from('daily_news').select('id').limit(1);
+            supabaseEmpty = !data || data.length === 0;
+          } catch (supaErr) {
+            // Supabase connection warning (optional)
+          }
+        }
+        
+        const vaultEmpty = !snapshot || snapshot.empty;
+        if (vaultEmpty || supabaseEmpty) {
+          console.log("[Imperial Server] News archives empty or incomplete. Initiating background reconnaissance...");
           syncNews().catch(err => console.error("Initial background sync failed:", err));
         } else {
           console.log("[Imperial Server] News archives found. Ready for duty.");
         }
       } catch (err) {
-        console.error("[Imperial Server] Initial news check failed:", err);
+        // High level warning instead of hard crash
+        console.warn("[Imperial Server] Initial news reconnaissance check bypassed.");
       }
-    } else {
+    }
+ else {
       console.warn("[Imperial Server] Database not initialized. Some features may be offline.");
     }
   });

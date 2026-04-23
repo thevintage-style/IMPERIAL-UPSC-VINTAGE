@@ -178,6 +178,12 @@ service cloud.firestore {
       match /notes/{noteId} {
         allow read, write: if isOwner(userId) || isAdmin();
       }
+      match /folders/{folderId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+      match /journals/{journalId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
     }
 
     // Public Profiles
@@ -214,7 +220,33 @@ service cloud.firestore {
     match /communityMessages/{id} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && request.resource.data.senderId == request.auth.uid;
-      allow update, delete: if isAdmin();
+      allow update: if isAuthenticated(); // For reactions
+      allow delete: if isAdmin();
+
+      match /comments/{commentId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated() && request.resource.data.senderId == request.auth.uid;
+        allow delete: if isAdmin() || (isAuthenticated() && resource.data.senderId == request.auth.uid);
+      }
+    }
+
+    // Recently Viewed Resources
+    match /recentlyViewed/{id} {
+      allow read, write: if isAuthenticated() && (request.auth.uid == resource.data.userId || request.auth.uid == request.resource.data.userId || isAdmin());
+    }
+
+    // Community Posts (Modern)
+    match /community_posts/{postId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated(); // For reactions
+      allow delete: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+
+      match /comments/{commentId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+        allow delete: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      }
     }
 
     // Resource Posts
@@ -231,11 +263,27 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Transactions
+    match /transactions/{id} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
+    // Audit Logs
+    match /auditLogs/{id} {
+      allow read, write: if isAdmin();
+    }
+
+    // Engagement Stats
+    match /engagementStats/{id} {
+      allow read, write: if isAdmin();
+    }
+
     // Resource Hub
     match /resource_hub/{id} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update, delete: if isAdmin() || (isAuthenticated() && resource.data.uploader_id == request.auth.uid);
+      allow create, update, delete: if isAdmin();
     }
 
     // System Meta

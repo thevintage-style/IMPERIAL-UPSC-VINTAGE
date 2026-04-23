@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { User } from 'firebase/auth';
+import { User as FirebaseUser } from 'firebase/auth';
+import { User as SupabaseUser } from '@supabase/supabase-js';
+import { supabase } from '../lib/supabase';
 import { 
   collection, 
   query, 
@@ -15,6 +17,7 @@ import {
   where
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { CreativeSuite } from './CreativeSuite';
 import { 
   Book, 
   Table, 
@@ -36,7 +39,8 @@ import {
   X,
   CheckCircle2,
   Trash,
-  Plus
+  Plus,
+  Brush
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { motion, AnimatePresence } from 'motion/react';
@@ -59,7 +63,7 @@ interface LogEntry {
 }
 
 interface FolioProps {
-  user: User;
+  user: FirebaseUser | SupabaseUser;
 }
 
 export function Folio({ user }: FolioProps) {
@@ -70,51 +74,65 @@ export function Folio({ user }: FolioProps) {
   const [showSettings, setShowSettings] = useState(false);
   const [status, setStatus] = useState<{ type: 'success' | 'error' | 'info', message: string } | null>(null);
   const [confirmClearAll, setConfirmClearAll] = useState(false);
+  const [creativeMode, setCreativeMode] = useState(false);
 
   // Module States
   const [journalText, setJournalText] = useState('');
-  const [sheetRows, setSheetRows] = useState<{ time: string, topic: string, status: string }[]>([
-    { time: '06:00 - 08:00', topic: 'Ancient History', status: 'Completed' }
-  ]);
+  const [sheetRows, setSheetRows] = useState<{ id?: string, time: string, topic: string, status: string, duration?: number }[]>([]);
   const [strokes, setStrokes] = useState<any[]>([]);
   const [currentStroke, setCurrentStroke] = useState<any>(null);
   const [penColor, setPenColor] = useState('#8B4513');
   const [penSize, setPenSize] = useState(3);
   const [isEraser, setIsEraser] = useState(false);
+  const [savedJournals, setSavedJournals] = useState<any[]>([]);
 
   const canvasRef = useRef<SVGSVGElement>(null);
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isInitialLoad = useRef(true);
+  const userId = (user as any).uid || (user as any).id;
 
   // Load Latest Log on Mount
   useEffect(() => {
-    if (!user?.uid) return;
+    if (!userId) return;
 
     const q = query(
-      collection(db, `users/${user.uid}/notes`),
+      collection(db, `users/${userId}/notes`),
       orderBy('createdAt', 'desc'),
       limit(1)
     );
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
       if (!snapshot.empty) {
         const docData = snapshot.docs[0].data() as LogEntry;
         const logId = snapshot.docs[0].id;
         
-        // Only update local state if this is the first load or a new log is created
         if (isInitialLoad.current || (currentLog && currentLog.id !== logId)) {
           setCurrentLog({ ...docData, id: logId });
           setJournalText(docData.journalData || '');
           try {
-            setSheetRows(JSON.parse(docData.sheetData || '[]'));
-          } catch (e) { console.error("Sheet parse error", e); }
-          try {
             setStrokes(JSON.parse(docData.canvasData || '[]'));
           } catch (e) { console.error("Canvas parse error", e); }
+          
+          // Fetch Supabase logs for the sheet
+          const { data: supaLogs } = await supabase
+            .from('study_logs')
+            .select('*')
+            .eq('user_id', userId)
+            .order('date', { ascending: false });
+          
+          if (supaLogs) {
+            setSheetRows(supaLogs.map(l => ({
+              id: l.id,
+              time: l.date,
+              topic: l.subject,
+              status: 'Completed',
+              duration: l.duration_minutes
+            })));
+          }
+
           isInitialLoad.current = false;
         }
       } else {
-        // No logs found, start fresh
         setCurrentLog(null);
         setJournalText('');
         setSheetRows([]);
@@ -122,11 +140,24 @@ export function Folio({ user }: FolioProps) {
         isInitialLoad.current = false;
       }
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/notes`);
+      console.warn("Folio Notes Listener Error (Recoverable):", error);
     });
 
     return () => unsubscribe();
-  }, [user?.uid]);
+  }, [userId]);
+
+  // Load Saved Journals
+  useEffect(() => {
+    if (!userId) return;
+    const q = query(
+      collection(db, `users/${userId}/journals`),
+      orderBy('createdAt', 'desc')
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setSavedJournals(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+    return () => unsubscribe();
+  }, [userId]);
 
   // Auto-save Logic
   useEffect(() => {
@@ -144,12 +175,12 @@ export function Folio({ user }: FolioProps) {
   }, [journalText, sheetRows, strokes]);
 
   const handleSave = async (isAuto = false) => {
-    if (!user?.uid) return;
+    if (!userId) return;
     if (!isAuto) setIsSaving(true);
 
     try {
       const logData = {
-        userId: user.uid,
+        userId,
         title: `Imperial Log - ${new Date().toLocaleDateString()}`,
         journalData: journalText,
         sheetData: JSON.stringify(sheetRows),
@@ -158,26 +189,37 @@ export function Folio({ user }: FolioProps) {
         createdAt: currentLog?.createdAt || serverTimestamp()
       };
 
+      // Save to Supabase (study_logs)
+      if (!isAuto && sheetRows.length > 0) {
+        const latestEntry = sheetRows[sheetRows.length - 1];
+        await supabase.from('study_logs').insert({
+          user_id: userId,
+          subject: latestEntry.topic,
+          duration_minutes: latestEntry.duration || 60,
+          notes: journalText.substring(0, 500)
+        });
+      }
+
       if (currentLog?.id) {
-        await updateDoc(doc(db, `users/${user.uid}/notes`, currentLog.id), logData);
+        await updateDoc(doc(db, `users/${userId}/notes`, currentLog.id), logData);
       } else {
-        const docRef = await addDoc(collection(db, `users/${user.uid}/notes`), logData);
+        const docRef = await addDoc(collection(db, `users/${userId}/notes`), logData);
         setCurrentLog({ ...logData, id: docRef.id });
       }
 
-      if (!isAuto) setStatus({ type: 'success', message: "Imperial Log safely archived." });
+      if (!isAuto) setStatus({ type: 'success', message: "Imperial Log safely archived in Supabase." });
     } catch (error) {
       console.error("Save Error:", error);
-      if (!isAuto) setStatus({ type: 'error', message: "The archives are currently sealed. Could not save." });
+      if (!isAuto) setStatus({ type: 'error', message: "The archives are currently sealed." });
     } finally {
       if (!isAuto) setIsSaving(false);
     }
   };
 
   const handleClearAll = async () => {
-    if (!user?.uid) return;
+    if (!userId) return;
     try {
-      const q = query(collection(db, `users/${user.uid}/notes`));
+      const q = query(collection(db, `users/${userId}/notes`));
       const snapshot = await getDocs(q);
       const deletePromises = snapshot.docs.map(d => deleteDoc(d.ref));
       await Promise.all(deletePromises);
@@ -190,7 +232,7 @@ export function Folio({ user }: FolioProps) {
       setConfirmClearAll(false);
       setShowSettings(false);
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}/notes`);
+      handleFirestoreError(error, OperationType.DELETE, `users/${userId}/notes`);
     }
   };
 
@@ -198,11 +240,9 @@ export function Folio({ user }: FolioProps) {
     if (!process.env.VINTAGE_ORACLE_KEY || isAnalyzing) return;
     setIsAnalyzing(true);
     try {
-      const aiResult = await ai.models.generateContent({
-        model: "gemini-1.5-flash",
-        contents: [{ role: "user", parts: [{ text: `
-        As the Imperial Scholar, analyze this UPSC aspirant's daily log:
-        
+      const genAI = new GoogleGenAI({ apiKey: process.env.VINTAGE_ORACLE_KEY || "" });
+      
+      const prompt = `As the Imperial Scholar, analyze this UPSC aspirant's daily log:
         Journal: ${journalText}
         Study Hours: ${sheetRows.map(r => `${r.time}: ${r.topic} (${r.status})`).join(', ')}
         
@@ -210,14 +250,16 @@ export function Folio({ user }: FolioProps) {
         1. A 'Smart Summary' of the day's progress.
         2. Three 'Contextual Suggestions' for UPSC Mains answer writing based on these topics.
         3. A motivational quote from an Indian leader.
-        
-        Format as clean Markdown.
-      ` }] }]
+        Format as clean Markdown.`;
+
+      const aiResult = await genAI.models.generateContent({
+        model: "gemini-1.5-flash",
+        contents: [{ role: "user", parts: [{ text: prompt }] }]
       });
       const text = aiResult.text;
       
       if (currentLog?.id) {
-        await updateDoc(doc(db, `users/${user.uid}/notes`, currentLog.id), {
+        await updateDoc(doc(db, `users/${userId}/notes`, currentLog.id), {
           aiSummary: text
         });
       }
@@ -259,20 +301,6 @@ export function Folio({ user }: FolioProps) {
 
   return (
     <div className="h-full flex flex-col gap-6 relative">
-      {/* 2D Bronze Sticker - Top Right */}
-      <div className="absolute top-[-20px] right-[-20px] z-50 p-[30px]">
-        <div className="relative group">
-          <div className="w-24 h-24 bg-[#D4AF37] rounded-full border-4 border-white shadow-[0_0_0_2px_rgba(139,69,19,0.2)] flex flex-col items-center justify-center text-center p-2 transform rotate-12 group-hover:rotate-0 transition-transform duration-500">
-            <span className="text-[8px] font-bold text-leather uppercase tracking-tighter leading-none">Iron Man</span>
-            <span className="text-[10px] font-display font-black text-leather uppercase leading-none">OF INDIA</span>
-            <div className="w-8 h-0.5 bg-leather/20 my-1" />
-            <span className="text-[6px] font-serif italic text-leather/60">Imperial Seal</span>
-          </div>
-          {/* Die-cut white border effect */}
-          <div className="absolute inset-[-4px] border-4 border-white rounded-full -z-10 shadow-lg" />
-        </div>
-      </div>
-
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
@@ -281,7 +309,7 @@ export function Folio({ user }: FolioProps) {
           </div>
           <div>
             <h2 className="text-3xl font-display font-bold text-leather tracking-tight">Imperial Folio</h2>
-            <p className="text-sm font-serif italic text-saddle-brown">The Master's Workspace • IRON MAN OF INDIA</p>
+            <p className="text-sm font-serif italic text-saddle-brown">The Master's Workspace • Digital Archives</p>
           </div>
         </div>
 
@@ -365,206 +393,298 @@ export function Folio({ user }: FolioProps) {
 
       {/* Main Workspace */}
       <div className="flex-1 flex gap-6 overflow-hidden">
-        {/* Module Selector Sidebar */}
-        <div className="w-20 flex flex-col gap-4">
-          {[
-            { id: 'journal', icon: FileText, label: 'Journal' },
-            { id: 'sheet', icon: Table, label: 'Log' },
-            { id: 'canvas', icon: PenTool, label: 'Canvas' }
-          ].map((mod) => (
+        {/* Sidebar */}
+        <div className="w-72 flex flex-col gap-6 overflow-y-auto custom-scrollbar pr-2">
+          {/* Expedition Tools */}
+          <div className="flex flex-col gap-3">
+            <h3 className="text-[10px] font-bold uppercase tracking-widest text-[#8B4513]/40 pl-2">Log Sheets</h3>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { id: 'journal', icon: FileText, label: 'Journal' },
+                { id: 'sheet', icon: Table, label: 'Log' },
+                { id: 'canvas', icon: PenTool, label: 'Canvas' }
+              ].map((mod) => (
+                <button
+                  key={mod.id}
+                  onClick={() => {
+                    setActiveModule(mod.id as any);
+                    setCreativeMode(false);
+                  }}
+                  className={`flex flex-col items-center justify-center p-3 rounded-xl transition-all border-2 ${
+                    activeModule === mod.id && !creativeMode
+                      ? 'bg-saddle-brown text-parchment border-antique-gold shadow-md' 
+                      : 'bg-white text-saddle-brown border-saddle-brown/10 hover:border-antique-gold/30'
+                  }`}
+                >
+                  <mod.icon size={20} />
+                  <span className="text-[9px] font-bold uppercase tracking-tighter mt-1">{mod.label}</span>
+                </button>
+              ))}
+            </div>
+            
             <button
-              key={mod.id}
-              onClick={() => setActiveModule(mod.id as any)}
-              className={`flex flex-col items-center justify-center p-4 rounded-2xl transition-all border-2 ${
-                activeModule === mod.id 
-                  ? 'bg-saddle-brown text-parchment border-antique-gold shadow-xl scale-105' 
-                  : 'bg-white text-saddle-brown border-saddle-brown/10 hover:border-antique-gold/50'
+              onClick={() => setCreativeMode(!creativeMode)}
+              className={`flex items-center justify-center gap-3 p-4 rounded-xl transition-all border-2 ${
+                creativeMode 
+                  ? 'bg-[#02120b] text-[#7FFFD4] border-[#7FFFD4] shadow-[0_0_20px_rgba(127,255,212,0.2)]' 
+                  : 'bg-white text-saddle-brown border-saddle-brown/10 hover:border-antique-gold/30'
               }`}
             >
-              <mod.icon size={24} />
-              <span className="text-[10px] font-bold uppercase tracking-tighter mt-2">{mod.label}</span>
+              <Brush size={20} className={creativeMode ? "animate-pulse" : ""} />
+              <span className="text-xs font-bold uppercase tracking-widest">Creative Mode</span>
             </button>
-          ))}
+          </div>
+
+          {/* Saved Journals Section */}
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between pl-2">
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-leather/40">Saved Journals</h3>
+              <button 
+                onClick={async () => {
+                  try {
+                    await addDoc(collection(db, `users/${userId}/journals`), {
+                      userId,
+                      title: `Journal Entry - ${new Date().toLocaleDateString()}`,
+                      content: journalText,
+                      createdAt: serverTimestamp()
+                    });
+                    setStatus({ type: 'success', message: "Journal entry permanently archived." });
+                  } catch (e) {
+                    console.error("Journal Save Error:", e);
+                    setStatus({ type: 'error', message: "Failed to archive journal entry." });
+                  }
+                }}
+                className="text-[10px] font-bold text-antique-gold hover:text-saddle-brown flex items-center gap-1"
+              >
+                <Plus size={12} /> New
+              </button>
+            </div>
+            <div className="flex flex-col gap-2">
+              {savedJournals.length > 0 ? (
+                savedJournals.map((journal) => (
+                  <button
+                    key={journal.id}
+                    onClick={() => {
+                      setJournalText(journal.content);
+                      setActiveModule('journal');
+                    }}
+                    className="text-left p-3 rounded-xl bg-white border border-saddle-brown/5 hover:border-antique-gold/40 hover:shadow-sm transition-all group"
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className="w-1.5 h-1.5 rounded-full bg-antique-gold group-hover:scale-125 transition-transform" />
+                      <span className="text-xs font-bold text-leather truncate w-full">{journal.title}</span>
+                    </div>
+                    <p className="text-[10px] font-serif italic text-leather/40 truncate">
+                      {new Date(journal.createdAt?.toDate?.() || journal.createdAt).toLocaleDateString()}
+                    </p>
+                  </button>
+                ))
+              ) : (
+                <div className="p-8 text-center border-2 border-dashed border-saddle-brown/10 rounded-2xl opacity-40">
+                  <Book size={24} className="mx-auto mb-2" />
+                  <p className="text-[10px] font-serif italic">The archives are empty.</p>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Active Module Content */}
         <div className="flex-1 parchment-card flex flex-col overflow-hidden relative border-2 border-saddle-brown/20 shadow-2xl">
-          {/* Module Header */}
-          <div className="p-4 border-b border-saddle-brown/10 bg-leather/5 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-2 h-2 bg-antique-gold rounded-full animate-pulse" />
-              <span className="text-xs font-bold uppercase tracking-widest text-leather/60">
-                {activeModule === 'journal' ? 'Digital Journal' : activeModule === 'sheet' ? 'Study Log Sheet' : 'Imperial Canvas'}
-              </span>
+          {creativeMode ? (
+            <div className="h-full overflow-hidden bg-[#02120b]">
+              <CreativeSuite userId={userId} />
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-serif italic text-saddle-brown/40">Auto-saving...</span>
-            </div>
-          </div>
-
-          {/* Content Area */}
-          <div className="flex-1 overflow-hidden relative">
-            {activeModule === 'journal' && (
-              <textarea
-                value={journalText}
-                onChange={(e) => setJournalText(e.target.value)}
-                placeholder="Record your daily strategy and reflections..."
-                className="w-full h-full p-10 bg-transparent font-serif text-lg leading-relaxed text-leather outline-none resize-none custom-scrollbar placeholder:text-saddle-brown/20"
-                style={{ backgroundImage: 'linear-gradient(#eee 1px, transparent 1px)', backgroundSize: '100% 2rem' }}
-              />
-            )}
-
-            {activeModule === 'sheet' && (
-              <div className="h-full overflow-y-auto p-8 custom-scrollbar">
-                <table className="w-full border-collapse">
-                  <thead>
-                    <tr className="border-b-2 border-saddle-brown/20">
-                      <th className="text-left p-4 font-display font-bold text-saddle-brown uppercase tracking-widest text-xs">Time Slot</th>
-                      <th className="text-left p-4 font-display font-bold text-saddle-brown uppercase tracking-widest text-xs">Topic / Subject</th>
-                      <th className="text-left p-4 font-display font-bold text-saddle-brown uppercase tracking-widest text-xs">Status</th>
-                      <th className="w-10"></th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-saddle-brown/10">
-                    {sheetRows.map((row, i) => (
-                      <tr key={i} className="group hover:bg-leather/5 transition-colors">
-                        <td className="p-2">
-                          <input 
-                            value={row.time}
-                            onChange={(e) => {
-                              const newRows = [...sheetRows];
-                              newRows[i].time = e.target.value;
-                              setSheetRows(newRows);
-                            }}
-                            className="w-full bg-transparent p-2 font-serif text-leather outline-none focus:bg-white rounded-lg"
-                          />
-                        </td>
-                        <td className="p-2">
-                          <input 
-                            value={row.topic}
-                            onChange={(e) => {
-                              const newRows = [...sheetRows];
-                              newRows[i].topic = e.target.value;
-                              setSheetRows(newRows);
-                            }}
-                            className="w-full bg-transparent p-2 font-serif text-leather outline-none focus:bg-white rounded-lg"
-                          />
-                        </td>
-                        <td className="p-2">
-                          <select 
-                            value={row.status}
-                            onChange={(e) => {
-                              const newRows = [...sheetRows];
-                              newRows[i].status = e.target.value;
-                              setSheetRows(newRows);
-                            }}
-                            className="w-full bg-transparent p-2 font-serif text-leather outline-none focus:bg-white rounded-lg appearance-none"
-                          >
-                            <option>Pending</option>
-                            <option>In Progress</option>
-                            <option>Completed</option>
-                            <option>Revised</option>
-                          </select>
-                        </td>
-                        <td className="p-2">
-                          <button 
-                            onClick={() => setSheetRows(sheetRows.filter((_, idx) => idx !== i))}
-                            className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 p-2"
-                          >
-                            <Trash size={14} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <Button 
-                  onClick={() => setSheetRows([...sheetRows, { time: '', topic: '', status: 'Pending' }])}
-                  variant="ghost"
-                  className="mt-6 w-full border-2 border-dashed border-saddle-brown/20 text-saddle-brown hover:bg-leather/5 rounded-2xl py-8"
-                >
-                  <Plus className="mr-2" size={16} />
-                  Add Study Session
-                </Button>
+          ) : (
+            <>
+              {/* Module Header */}
+              <div className="p-4 border-b border-saddle-brown/10 bg-leather/5 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-2 h-2 bg-antique-gold rounded-full animate-pulse" />
+                  <span className="text-xs font-bold uppercase tracking-widest text-leather/60">
+                    {activeModule === 'journal' ? 'Digital Journal' : activeModule === 'sheet' ? 'Study Log Sheet' : 'Imperial Canvas'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-serif italic text-saddle-brown/40">Auto-saving...</span>
+                </div>
               </div>
-            )}
 
-            {activeModule === 'canvas' && (
-              <div className="h-full flex flex-col">
-                {/* Canvas Toolbar */}
-                <div className="p-3 bg-leather/5 border-b border-saddle-brown/10 flex items-center gap-4">
-                  <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-saddle-brown/10">
-                    <button 
-                      onClick={() => setIsEraser(false)}
-                      className={`p-2 rounded-lg transition-colors ${!isEraser ? 'bg-saddle-brown text-parchment' : 'hover:bg-leather/5'}`}
-                    >
-                      <PenTool size={16} />
-                    </button>
-                    <button 
-                      onClick={() => setIsEraser(true)}
-                      className={`p-2 rounded-lg transition-colors ${isEraser ? 'bg-saddle-brown text-parchment' : 'hover:bg-leather/5'}`}
-                    >
-                      <Eraser size={16} />
-                    </button>
-                  </div>
-                  
-                  <div className="h-6 w-px bg-saddle-brown/10" />
-                  
-                  <div className="flex items-center gap-2">
-                    {['#8B4513', '#D4AF37', '#1A1612', '#B22222', '#2E8B57'].map(color => (
-                      <button
-                        key={color}
-                        onClick={() => { setPenColor(color); setIsEraser(false); }}
-                        className={`w-6 h-6 rounded-full border-2 transition-transform hover:scale-110 ${penColor === color && !isEraser ? 'border-antique-gold scale-110' : 'border-transparent'}`}
-                        style={{ backgroundColor: color }}
-                      />
-                    ))}
-                  </div>
-
-                  <div className="h-6 w-px bg-saddle-brown/10" />
-
-                  <input 
-                    type="range" min="1" max="20" 
-                    value={penSize} 
-                    onChange={(e) => setPenSize(parseInt(e.target.value))}
-                    className="w-24 accent-saddle-brown"
+              {/* Content Area */}
+              <div className="flex-1 overflow-hidden relative">
+                {activeModule === 'journal' && (
+                  <textarea
+                    value={journalText}
+                    onChange={(e) => setJournalText(e.target.value)}
+                    placeholder="Record your daily strategy and reflections..."
+                    className="w-full h-full p-10 bg-transparent font-serif text-lg leading-relaxed text-leather outline-none resize-none custom-scrollbar placeholder:text-saddle-brown/20"
+                    style={{ backgroundImage: 'linear-gradient(#eee 1px, transparent 1px)', backgroundSize: '100% 2rem' }}
                   />
+                )}
 
-                  <button 
-                    onClick={() => setStrokes([])}
-                    className="ml-auto text-[10px] font-bold uppercase tracking-widest text-red-500 hover:text-red-700"
-                  >
-                    Clear Canvas
-                  </button>
-                </div>
+                {activeModule === 'sheet' && (
+                  <div className="h-full overflow-y-auto p-8 custom-scrollbar">
+                    <table className="w-full border-collapse">
+                      <thead>
+                        <tr className="border-b-2 border-saddle-brown/20">
+                          <th className="text-left p-4 font-display font-bold text-saddle-brown uppercase tracking-widest text-xs">Time Slot</th>
+                          <th className="text-left p-4 font-display font-bold text-saddle-brown uppercase tracking-widest text-xs">Topic / Subject</th>
+                          <th className="text-left p-4 font-display font-bold text-saddle-brown uppercase tracking-widest text-xs">Status</th>
+                          <th className="w-10"></th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-saddle-brown/10">
+                        {sheetRows.map((row, i) => (
+                          <tr key={i} className="group hover:bg-leather/5 transition-colors">
+                            <td className="p-2">
+                              <input 
+                                value={row.time}
+                                onChange={(e) => {
+                                  const newRows = [...sheetRows];
+                                  newRows[i].time = e.target.value;
+                                  setSheetRows(newRows);
+                                }}
+                                className="w-full bg-transparent p-2 font-serif text-leather outline-none focus:bg-white rounded-lg"
+                              />
+                            </td>
+                            <td className="p-2">
+                              <input 
+                                value={row.topic}
+                                onChange={(e) => {
+                                  const newRows = [...sheetRows];
+                                  newRows[i].topic = e.target.value;
+                                  setSheetRows(newRows);
+                                }}
+                                className="w-full bg-transparent p-2 font-serif text-leather outline-none focus:bg-white rounded-lg"
+                              />
+                            </td>
+                            <td className="p-2">
+                              <select 
+                                value={row.status}
+                                onChange={(e) => {
+                                  const newRows = [...sheetRows];
+                                  newRows[i].status = e.target.value;
+                                  setSheetRows(newRows);
+                                }}
+                                className="w-full bg-transparent p-2 font-serif text-leather outline-none focus:bg-white rounded-lg appearance-none"
+                              >
+                                <option>Pending</option>
+                                <option>In Progress</option>
+                                <option>Completed</option>
+                                <option>Revised</option>
+                              </select>
+                            </td>
+                            <td className="p-2">
+                              <button 
+                                onClick={() => setSheetRows(sheetRows.filter((_, idx) => idx !== i))}
+                                className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 p-2"
+                              >
+                                <Trash size={14} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <Button 
+                      onClick={() => setSheetRows([...sheetRows, { time: '', topic: '', status: 'Pending' }])}
+                      variant="ghost"
+                      className="mt-6 w-full border-2 border-dashed border-saddle-brown/20 text-saddle-brown hover:bg-leather/5 rounded-2xl py-8"
+                    >
+                      <Plus className="mr-2" size={16} />
+                      Add Study Session
+                    </Button>
+                  </div>
+                )}
 
-                <div className="flex-1 relative cursor-crosshair overflow-hidden">
-                  <svg
-                    ref={canvasRef}
-                    className="w-full h-full touch-none"
-                    onPointerDown={handlePointerDown}
-                    onPointerMove={handlePointerMove}
-                    onPointerUp={handlePointerUp}
-                    style={{ backgroundImage: 'radial-gradient(#8B4513 0.5px, transparent 0.5px)', backgroundSize: '20px 20px' }}
-                  >
-                    {strokes.map((stroke, i) => (
-                      <path
-                        key={i}
-                        d={getSvgPathFromStroke(getStroke(stroke.points, { size: stroke.size }))}
-                        fill={stroke.color}
-                      />
-                    ))}
-                    {currentStroke && (
-                      <path
-                        d={getSvgPathFromStroke(getStroke(currentStroke.points, { size: currentStroke.size }))}
-                        fill={currentStroke.color}
-                      />
-                    )}
-                  </svg>
-                </div>
+                {activeModule === 'canvas' && (
+                  <div className="h-full flex flex-col">
+                    {/* Canvas Toolbar */}
+                    <div className="p-3 bg-leather/5 border-b border-saddle-brown/10 flex items-center gap-4">
+                      <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-saddle-brown/10">
+                        <button 
+                          onClick={() => setIsEraser(false)}
+                          className={`p-2 rounded-lg transition-colors ${!isEraser ? 'bg-saddle-brown text-parchment' : 'hover:bg-leather/5'}`}
+                        >
+                          <PenTool size={16} />
+                        </button>
+                        <button 
+                          onClick={() => setIsEraser(true)}
+                          className={`p-2 rounded-lg transition-colors ${isEraser ? 'bg-saddle-brown text-parchment' : 'hover:bg-leather/5'}`}
+                        >
+                          <Eraser size={16} />
+                        </button>
+                      </div>
+                      
+                      <div className="h-6 w-px bg-saddle-brown/10" />
+                      
+                      <div className="flex items-center gap-2">
+                        {['#8B4513', '#D4AF37', '#1A1612', '#B22222', '#2E8B57', '#0000FF', '#4B0082'].map(color => (
+                          <button
+                            key={color}
+                            onClick={() => { setPenColor(color); setIsEraser(false); }}
+                            className={`w-6 h-6 rounded-full border-2 transition-transform hover:scale-110 ${penColor === color && !isEraser ? 'border-antique-gold scale-110' : 'border-transparent'}`}
+                            style={{ backgroundColor: color }}
+                          />
+                        ))}
+                        <input 
+                          type="color" 
+                          value={penColor} 
+                          onChange={(e) => { setPenColor(e.target.value); setIsEraser(false); }}
+                          className="w-6 h-6 rounded-full p-0 border-none cursor-pointer bg-transparent"
+                        />
+                      </div>
+
+                      <div className="h-6 w-px bg-saddle-brown/10" />
+
+                      <div className="flex items-center gap-3">
+                        <span className="text-[10px] font-bold text-[#8B4513]/40 uppercase">Weight</span>
+                        <input 
+                          type="range" min="1" max="25" 
+                          value={penSize} 
+                          onChange={(e) => setPenSize(parseInt(e.target.value))}
+                          className="w-32 accent-[#8B4513] cursor-pointer"
+                        />
+                        <span className="text-[10px] font-mono font-bold text-[#8B4513] w-4">{penSize}</span>
+                      </div>
+
+                      <button 
+                        onClick={() => setStrokes([])}
+                        className="ml-auto text-[10px] font-bold uppercase tracking-widest text-red-500 hover:text-red-700"
+                      >
+                        Clear Canvas
+                      </button>
+                    </div>
+
+                    <div className="flex-1 relative cursor-crosshair overflow-hidden">
+                      <svg
+                        ref={canvasRef}
+                        className="w-full h-full touch-none"
+                        onPointerDown={handlePointerDown}
+                        onPointerMove={handlePointerMove}
+                        onPointerUp={handlePointerUp}
+                        style={{ backgroundImage: 'radial-gradient(#8B4513 0.5px, transparent 0.5px)', backgroundSize: '20px 20px' }}
+                      >
+                        {strokes.map((stroke, i) => (
+                          <path
+                            key={i}
+                            d={getSvgPathFromStroke(getStroke(stroke.points, { size: stroke.size }))}
+                            fill={stroke.color}
+                          />
+                        ))}
+                        {currentStroke && (
+                          <path
+                            d={getSvgPathFromStroke(getStroke(currentStroke.points, { size: currentStroke.size }))}
+                            fill={currentStroke.color}
+                          />
+                        )}
+                      </svg>
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            </>
+          )}
         </div>
 
         {/* AI Insights Panel */}

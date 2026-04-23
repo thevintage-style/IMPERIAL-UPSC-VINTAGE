@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { User } from 'firebase/auth';
+import { User as FirebaseUser } from 'firebase/auth';
+import { User as SupabaseUser } from '@supabase/supabase-js';
 import { motion, AnimatePresence } from 'motion/react';
-import { Mic, MicOff, Volume2, VolumeX, Sparkles, Zap, Brain, MessageSquare } from 'lucide-react';
-import { GoogleGenAI } from '@google/genai';
+import { Mic, MicOff, Volume2, VolumeX, Sparkles, Zap, Brain, MessageSquare, History } from 'lucide-react';
+import { routeAIRequest } from '../services/aiRouter';
 import { db, doc, updateDoc, collection, addDoc, serverTimestamp } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 
 interface OracleOSProps {
-  user: User;
+  user: FirebaseUser | SupabaseUser;
   onCommand?: (command: string, response: string) => void;
 }
 
@@ -103,41 +105,40 @@ export function OracleOS({ user, onCommand }: OracleOSProps) {
     setStatus('processing');
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.VINTAGE_ORACLE_KEY || '' });
+      const uid = (user as any).uid || (user as any).id;
       
-      const systemInstruction = `
-        You are "Oracle", the Operating System of the Imperial UPSC Portal.
-        Your goal is to parse user voice commands into actions or scholarly insights.
+      // CONTEXTUAL MEMORY: Fetch recent logs if the query is about progress
+      let memoryContext = "";
+      if (transcript.toLowerCase().includes('progress') || transcript.toLowerCase().includes('yesterday') || transcript.toLowerCase().includes('today')) {
+        const { data: logs } = await supabase
+          .from('study_logs')
+          .select('*')
+          .eq('user_id', uid)
+          .limit(3)
+          .order('date', { ascending: false });
         
-        Available Actions:
-        1. "Log X hours of Y" -> Update user's study log.
-        2. "What's my progress?" -> Summarize their recent activities.
-        3. "Summarize the news" -> Fetch latest news snippets.
-        4. "General Query" -> Answer their UPSC question with scholarly wisdom.
+        if (logs && logs.length > 0) {
+          memoryContext = `User's recent study logs: ${logs.map(l => `${l.date}: ${l.subject} for ${l.duration_minutes} mins`).join('; ')}`;
+        }
+      }
 
-        User Command: ${transcript}
-        
-        If it's an action, respond with [ACTION: type, detail] and then a natural spoken response.
-        Tone: Master architect, reassuring, technical.
-      `;
-
-      const aiResult = await ai.models.generateContent({
-        model: "gemini-1.5-flash",
-        config: {
-          systemInstruction
-        },
-        contents: [{ role: "user", parts: [{ text: transcript }] }]
+      const responseText = await routeAIRequest({
+        prompt: transcript,
+        type: transcript.length > 100 ? 'essay' : 'logic',
+        context: memoryContext
       });
-      
-      const responseText = aiResult.text;
 
       // Process Actions
-      if (responseText.includes('[ACTION: Log')) {
-         // Mock logging logic for now
-         await addDoc(collection(db, `users/${user.uid}/vocal_logs`), {
-           command: transcript,
-           summary: "Vocal study log entry",
-           timestamp: serverTimestamp()
+      if (transcript.toLowerCase().includes('log') && transcript.toLowerCase().includes('hours')) {
+         // Real logging to Supabase
+         const subjectMatch = transcript.match(/for (.*?)(\.|$)/i) || transcript.match(/of (.*?)(\.|$)/i);
+         const durationMatch = transcript.match(/(\d+)\s*hour/i);
+         
+         await supabase.from('study_logs').insert({
+           user_id: uid,
+           subject: subjectMatch ? subjectMatch[1] : "General Study",
+           duration_minutes: durationMatch ? parseInt(durationMatch[1]) * 60 : 60,
+           notes: "Logged via Voice Command"
          });
       }
 

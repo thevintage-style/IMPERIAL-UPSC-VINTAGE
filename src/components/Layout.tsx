@@ -257,6 +257,10 @@ export function Layout({ user, activeTab, setActiveTab, children }: LayoutProps)
       </main>
 
       <OracleOS user={user as any} />
+      
+      <div className="fixed bottom-8 right-8 z-[100]">
+        <SocialSidebar />
+      </div>
 
       <style>{`
         .gold-leaf-text {

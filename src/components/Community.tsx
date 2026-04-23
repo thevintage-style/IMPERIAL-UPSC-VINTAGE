@@ -31,6 +31,14 @@ import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
 import { ReportModal } from './ReportModal';
 
+interface Comment {
+  id: string;
+  text: string;
+  senderId: string;
+  senderName: string;
+  createdAt: any;
+}
+
 interface Message {
   id: string;
   text: string;
@@ -41,7 +49,9 @@ interface Message {
   reactions?: Record<string, number>;
   replyToId?: string;
   createdAt: any;
-  type: 'text' | 'pdf' | 'video';
+  type: 'text' | 'pdf' | 'link';
+  comments?: Comment[];
+  channel?: 'general' | 'highlights';
 }
 
 interface CommunityProps {
@@ -49,33 +59,80 @@ interface CommunityProps {
   isAdmin: boolean;
 }
 
+const CommentSection = ({ msgId, channel }: { msgId: string, channel?: string }) => {
+  const [comments, setComments] = useState<Comment[]>([]);
+
+  useEffect(() => {
+    const q = query(
+      collection(db, `communityMessages/${msgId}/comments`),
+      orderBy('createdAt', 'asc')
+    );
+    return onSnapshot(q, (snapshot) => {
+      setComments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Comment)));
+    }, (error) => {
+      console.error("Comments Listener Error:", error);
+    });
+  }, [msgId]);
+
+  if (comments.length === 0) return null;
+
+  return (
+    <div className="mt-4 pl-4 border-l-2 border-[#B2AC88]/20 space-y-3">
+      {comments.map((comment) => (
+        <div key={comment.id} className="bg-[#F5F2E7]/30 p-3 rounded-xl border border-[#B2AC88]/10 text-xs">
+          <div className="flex justify-between items-center mb-1">
+            <span className="font-bold text-[#8B4513]">{comment.senderName}</span>
+            <span className="text-[8px] opacity-40 italic">
+              {comment.createdAt?.toDate?.()?.toLocaleDateString() || 'Just now'}
+            </span>
+          </div>
+          <p className="text-leather/80 leading-relaxed">{comment.text}</p>
+        </div>
+      ))}
+    </div>
+  );
+};
+
 export function Community({ user, isAdmin }: CommunityProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isFiltering, setIsFiltering] = useState(false);
   const [reportingMsg, setReportingMsg] = useState<Message | null>(null);
+  const [activeReplyId, setActiveReplyId] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState('');
   const [view, setView] = useState<'chat' | 'square' | 'dashboard'>('chat');
+  const [activeChannel, setActiveChannel] = useState<'general' | 'highlights'>('general');
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const adminChatId = "ADMIN_HUB";
 
   useEffect(() => {
+    if (!user?.uid || !db) return;
     const q = query(
       collection(db, 'communityMessages'),
+      where('channel', '==', activeChannel),
       orderBy('createdAt', 'asc'),
       limit(100)
     );
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const msgs = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Message[];
+    // Fallback for older messages without channel field
+    const qLegacy = activeChannel === 'general' ? query(
+      collection(db, 'communityMessages'),
+      orderBy('createdAt', 'asc'),
+      limit(100)
+    ) : null;
+
+    const unsubscribe = onSnapshot(activeChannel === 'highlights' ? q : qLegacy || q, (snapshot) => {
+      const msgs = snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() }))
+        .filter((m: any) => !m.channel || m.channel === activeChannel) as Message[];
       setMessages(msgs);
+    }, (error) => {
+      console.error("Community Messages Listener Error:", error);
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [activeChannel]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -123,7 +180,8 @@ export function Community({ user, isAdmin }: CommunityProps) {
         senderPhoto: user.photoURL,
         type: 'text',
         createdAt: serverTimestamp(),
-        reactions: {}
+        reactions: {},
+        channel: activeChannel
       });
       setInputText('');
     } catch (error) {
@@ -169,30 +227,66 @@ export function Community({ user, isAdmin }: CommunityProps) {
     }
   };
 
+  const handleReply = async (msgId: string) => {
+    if (!replyText.trim()) return;
+
+    try {
+      await addDoc(collection(db, `communityMessages/${msgId}/comments`), {
+        text: replyText,
+        senderId: user.uid,
+        senderName: user.displayName || 'Anonymous Scholar',
+        createdAt: serverTimestamp()
+      });
+      setReplyText('');
+      setActiveReplyId(null);
+    } catch (error) {
+      console.error("Error sending reply:", error);
+    }
+  };
+
   const pinnedMessages = messages.filter(m => m.isPinned);
 
   return (
     <div className="h-full flex flex-col bg-parchment/50 rounded-3xl border-2 border-saddle-brown/20 overflow-hidden shadow-inner">
       {/* View Toggle */}
-      <div className="flex bg-white border-b border-leather/10 p-2">
-        <button 
-          onClick={() => setView('chat')}
-          className={`flex-1 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${view === 'chat' ? 'bg-leather text-parchment shadow-md' : 'text-leather/40 hover:text-leather'}`}
-        >
-          Imperial Chat
-        </button>
-        <button 
-          onClick={() => setView('square')}
-          className={`flex-1 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${view === 'square' ? 'bg-leather text-parchment shadow-md' : 'text-leather/40 hover:text-leather'}`}
-        >
-          Community Square
-        </button>
-        <button 
-          onClick={() => setView('dashboard')}
-          className={`flex-1 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${view === 'dashboard' ? 'bg-leather text-parchment shadow-md' : 'text-leather/40 hover:text-leather'}`}
-        >
-          Community Dashboard
-        </button>
+      <div className="flex bg-white border-b border-leather/10 p-2 gap-2">
+        <div className="flex flex-1 gap-1">
+          <button 
+            onClick={() => setView('chat')}
+            className={`flex-1 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${view === 'chat' ? 'bg-leather text-parchment shadow-md' : 'text-leather/40 hover:text-leather'}`}
+          >
+            Imperial Chat
+          </button>
+          <button 
+            onClick={() => setView('square')}
+            className={`flex-1 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${view === 'square' ? 'bg-leather text-parchment shadow-md' : 'text-leather/40 hover:text-leather'}`}
+          >
+            Community Square
+          </button>
+          <button 
+            onClick={() => setView('dashboard')}
+            className={`flex-1 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${view === 'dashboard' ? 'bg-leather text-parchment shadow-md' : 'text-leather/40 hover:text-leather'}`}
+          >
+            Dashboard
+          </button>
+        </div>
+        
+        <div className="h-8 w-[1px] bg-leather/10 self-center" />
+
+        <div className="flex flex-1 gap-1">
+          <button 
+            onClick={() => setActiveChannel('general')}
+            className={`flex-1 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${activeChannel === 'general' ? 'bg-[#8B4513] text-white shadow-md' : 'text-[#8B4513]/40 hover:text-[#8B4513]'}`}
+          >
+            General
+          </button>
+          <button 
+            onClick={() => setActiveChannel('highlights')}
+            className={`flex-1 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${activeChannel === 'highlights' ? 'bg-antique-gold text-leather shadow-md' : 'text-[#D4AF37]/40 hover:text-[#D4AF37]'}`}
+          >
+            Highlights
+          </button>
+        </div>
       </div>
 
       <div className="bg-antique-gold/10 p-4 flex items-center justify-between border-b border-leather/10">
@@ -265,36 +359,98 @@ export function Community({ user, isAdmin }: CommunityProps) {
                 key={msg.id}
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="bg-white rounded-[32px] border border-leather/10 p-6 shadow-lg hover:shadow-xl transition-all group overflow-hidden relative"
+                className="bg-white/40 backdrop-blur-md rounded-[32px] border-2 border-[#B2AC88]/20 p-8 shadow-sm hover:shadow-md transition-all group overflow-hidden relative"
               >
                 <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
-                  <MessageSquare size={80} />
+                  <Sparkles size={80} className="text-[#B2AC88]" />
                 </div>
                 
-                <div className="flex items-center gap-3 mb-4">
-                  <img src={msg.senderPhoto || `https://api.dicebear.com/7.x/avataaars/svg?seed=${msg.senderId}`} className="w-8 h-8 rounded-full border border-leather/10" alt="" />
-                  <div>
-                    <h5 className="text-[10px] font-bold uppercase tracking-widest text-leather">{msg.senderName}</h5>
-                    <p className="text-[8px] font-serif italic text-leather/40">Posted on {msg.createdAt?.toDate().toLocaleDateString()}</p>
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-3">
+                    <img 
+                      src={msg.senderPhoto || `https://api.dicebear.com/7.x/avataaars/svg?seed=${msg.senderId}`} 
+                      className="w-10 h-10 rounded-full border-2 border-[#B2AC88]/20 shadow-sm" 
+                      alt="" 
+                    />
+                    <div>
+                      <h5 className="text-[10px] font-bold uppercase tracking-widest text-[#8B4513]">{msg.senderName}</h5>
+                      <p className="text-[8px] font-serif italic text-leather/40">Archived on {msg.createdAt?.toDate?.()?.toLocaleDateString() || 'Recently'}</p>
+                    </div>
                   </div>
+                  {isAdmin && (
+                    <button onClick={() => handleDeleteMessage(msg.id)} className="text-red-300 hover:text-red-500 transition-colors">
+                      <Trash2 size={16} />
+                    </button>
+                  )}
                 </div>
 
-                <div className="space-y-4">
-                  <p className="text-sm font-serif leading-relaxed text-leather/80 group-hover:text-leather transition-colors h-24 overflow-hidden line-clamp-4">
+                <div className="space-y-6">
+                  <p className="text-sm font-serif leading-relaxed text-leather/80 group-hover:text-leather transition-colors min-h-[60px]">
                     {msg.text}
                   </p>
                   
-                  <div className="flex items-center gap-2 pt-4 border-t border-leather/5">
-                    <button onClick={() => handleReaction(msg.id, '🔥')} className="px-3 py-1 bg-parchment/50 rounded-full text-[10px] font-bold text-leather flex items-center gap-1 hover:bg-orange-100 transition-colors">
-                      🔥 {msg.reactions?.['🔥'] || 0}
-                    </button>
-                    <button onClick={() => handleReaction(msg.id, '📜')} className="px-3 py-1 bg-parchment/50 rounded-full text-[10px] font-bold text-leather flex items-center gap-1 hover:bg-blue-100 transition-colors">
-                      📜 {msg.reactions?.['📜'] || 0}
-                    </button>
-                    <button onClick={() => handleReaction(msg.id, '💡')} className="px-3 py-1 bg-parchment/50 rounded-full text-[10px] font-bold text-leather flex items-center gap-1 hover:bg-yellow-100 transition-colors">
-                      💡 {msg.reactions?.['💡'] || 0}
-                    </button>
-                  </div>
+                      {/* Reaction Engine */}
+                      <div className="flex flex-wrap items-center gap-2 pt-4 border-t border-[#B2AC88]/10">
+                        {['🔥', '📜', '💡', '💯', '🙏'].map((emoji) => (
+                          <button 
+                            key={emoji}
+                            onClick={() => handleReaction(msg.id, emoji)}
+                            className={`px-3 py-1.5 rounded-full text-[10px] font-bold transition-all flex items-center gap-1.5 ${
+                              msg.reactions?.[emoji] 
+                                ? 'bg-[#8B4513] text-[#F5F2E7] shadow-sm' 
+                                : 'bg-[#F5F2E7]/50 text-[#8B4513] border border-[#B2AC88]/10 hover:bg-[#B2AC88]/20'
+                            }`}
+                          >
+                            <span>{emoji}</span>
+                            <span>{msg.reactions?.[emoji] || 0}</span>
+                          </button>
+                        ))}
+                        <div className="flex-1" />
+                        <button 
+                          onClick={() => {
+                            if (activeChannel === 'highlights' && !isAdmin) {
+                              alert("Only Imperial Officers can initiate discussions in the Highlights channel. Please use reactions to express your scholarly dissent or agreement.");
+                              return;
+                            }
+                            setActiveReplyId(activeReplyId === msg.id ? null : msg.id);
+                          }}
+                          className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-[#8B4513] hover:text-[#D4AF37] transition-colors"
+                        >
+                          <MessageSquare size={14} />
+                          {activeReplyId === msg.id ? 'Close' : 'Discuss'}
+                        </button>
+                      </div>
+
+                  {/* Reply Input */}
+                  <AnimatePresence>
+                    {activeReplyId === msg.id && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="overflow-hidden space-y-3"
+                      >
+                        <div className="relative">
+                          <textarea
+                            placeholder="Add your scholarly insight..."
+                            value={replyText}
+                            onChange={(e) => setReplyText(e.target.value)}
+                            className="w-full bg-[#F5F2E7]/30 border border-[#B2AC88]/20 rounded-xl p-3 text-xs font-serif italic outline-none focus:border-[#D4AF37] h-20 resize-none"
+                          />
+                          <button 
+                            onClick={() => handleReply(msg.id)}
+                            disabled={!replyText.trim()}
+                            className="absolute bottom-3 right-3 p-2 bg-[#8B4513] text-[#F5F2E7] rounded-lg shadow-md hover:bg-[#1A1612] transition-colors disabled:opacity-50"
+                          >
+                            <Send size={14} />
+                          </button>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* Nested Comments */}
+                  <CommentSection msgId={msg.id} />
                 </div>
               </motion.div>
             ))}
@@ -416,8 +572,15 @@ export function Community({ user, isAdmin }: CommunityProps) {
       </div>
 
       {/* Input Area */}
-      <div className="p-6 bg-white border-t border-saddle-brown/10">
-        <div className="relative flex items-center gap-3">
+      {activeChannel === 'highlights' && !isAdmin ? (
+        <div className="p-4 bg-white border-t border-saddle-brown/10 text-center">
+          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#8B4513]/40">
+            Official Highlights is read-only for regular scholars. Add your reactions above!
+          </p>
+        </div>
+      ) : (
+        <div className="p-6 bg-white border-t border-saddle-brown/10">
+          <div className="relative flex items-center gap-3">
           <div className="flex-1 relative">
             <input 
               type="text"
@@ -454,6 +617,7 @@ export function Community({ user, isAdmin }: CommunityProps) {
           All proclamations are monitored by the Imperial Censors
         </p>
       </div>
+      )}
         </>
       )}
 

@@ -77,17 +77,24 @@ export function IntegratedResourceHub({ user, isAdmin }: IntegratedResourceHubPr
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    // Wait for Firebase auth to be ready
+    if (!user || !db) return;
+
     const q = query(collection(db, 'resource_hub'), orderBy('timestamp', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setResources(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ResourceHubItem)));
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'resource_hub');
+      // Don't throw for list operations to prevent app crash, just log and notify
+      console.error("Resource Hub Listener Error:", error);
+      if (error.message.includes('permission-denied')) {
+        setStatus({ type: 'error', message: "Imperial Authentication pending. Retrying link to Archives..." });
+      }
     });
     return () => unsubscribe();
-  }, []);
+  }, [user]);
 
   useEffect(() => {
-    if (!user?.uid || resources.length === 0) return;
+    if (!user?.uid || resources.length === 0 || !db) return;
     const q = query(
       collection(db, 'recentlyViewed'), 
       where('userId', '==', user.uid),
@@ -99,7 +106,7 @@ export function IntegratedResourceHub({ user, isAdmin }: IntegratedResourceHubPr
       const viewedResources = viewedIds.map(id => resources.find(r => r.id === id)).filter(Boolean) as ResourceHubItem[];
       setRecentlyViewed(viewedResources);
     }, (error) => {
-      console.error("Recently Viewed Listener Error:", error);
+      console.warn("Recently Viewed Listener (Recoverable):", error);
     });
     return () => unsubscribe();
   }, [user?.uid, resources]);
@@ -276,146 +283,138 @@ export function IntegratedResourceHub({ user, isAdmin }: IntegratedResourceHubPr
         </div>
       )}
 
-      {/* Upload Section */}
-      <div className="bg-white p-8 rounded-[32px] border-2 border-saddle-brown/10 shadow-sm">
-        <div className="flex items-center gap-3 mb-6">
-          <Upload className="text-antique-gold" size={20} />
-          <h3 className="text-lg font-serif font-bold text-leather">Archive New Material</h3>
-        </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 items-end">
-          <div className="space-y-2">
-            <label className="text-[10px] font-bold uppercase tracking-widest text-saddle-brown/60 ml-1">Resource Title</label>
-            <input 
-              type="text"
-              placeholder="e.g. Laxmikanth Polity Summary"
-              value={newResource.title}
-              onChange={(e) => setNewResource({...newResource, title: e.target.value})}
-              className="w-full bg-parchment/30 border border-saddle-brown/10 rounded-xl py-3 px-4 font-serif outline-none focus:border-antique-gold transition-all"
-            />
+      {/* Upload Section (Admin Only) */}
+      {isAdmin && (
+        <div className="bg-white/40 backdrop-blur-md p-8 rounded-[32px] border-2 border-[#B2AC88]/20 shadow-sm">
+          <div className="flex items-center gap-3 mb-6">
+            <Upload className="text-[#8B4513]" size={20} />
+            <h3 className="text-lg font-serif font-bold text-leather">Archive New Material</h3>
           </div>
           
-          <div className="space-y-2">
-            <label className="text-[10px] font-bold uppercase tracking-widest text-saddle-brown/60 ml-1">Category</label>
-            <select 
-              value={newResource.category}
-              onChange={(e) => setNewResource({...newResource, category: e.target.value})}
-              className="w-full bg-parchment/30 border border-saddle-brown/10 rounded-xl py-3 px-4 font-serif outline-none focus:border-antique-gold transition-all"
-            >
-              <option value="General">General</option>
-              <option value="NCERT">NCERT</option>
-              <option value="Standard">Standard Book</option>
-              <option value="Current Affairs">Current Affairs</option>
-              <option value="Notes">Personal Notes</option>
-            </select>
-          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 items-end">
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-[#8B4513]/60 ml-1">Resource Title</label>
+              <input 
+                type="text"
+                placeholder="e.g. Laxmikanth Polity Summary"
+                value={newResource.title}
+                onChange={(e) => setNewResource({...newResource, title: e.target.value})}
+                className="w-full bg-[#F5F2E7]/50 border border-[#B2AC88]/30 rounded-xl py-3 px-4 font-serif outline-none focus:border-[#D4AF37] transition-all"
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-[#8B4513]/60 ml-1">Category</label>
+              <select 
+                value={newResource.category}
+                onChange={(e) => setNewResource({...newResource, category: e.target.value})}
+                className="w-full bg-[#F5F2E7]/50 border border-[#B2AC88]/30 rounded-xl py-3 px-4 font-serif outline-none focus:border-[#D4AF37] transition-all"
+              >
+                <option value="General">General</option>
+                <option value="NCERT">NCERT</option>
+                <option value="Standard">Standard Book</option>
+                <option value="Current Affairs">Current Affairs</option>
+                <option value="Notes">Personal Notes</option>
+              </select>
+            </div>
 
-          <div className="space-y-2">
-            <label className="text-[10px] font-bold uppercase tracking-widest text-saddle-brown/60 ml-1">Type</label>
-            <select 
-              value={newResource.type}
-              onChange={(e) => setNewResource({...newResource, type: e.target.value as any})}
-              className="w-full bg-parchment/30 border border-saddle-brown/10 rounded-xl py-3 px-4 font-serif outline-none focus:border-antique-gold transition-all"
-            >
-              <option value="pdf">PDF Document</option>
-              <option value="video">Video Lecture</option>
-              <option value="link">External Link</option>
-            </select>
-          </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-[#8B4513]/60 ml-1">Type</label>
+              <select 
+                value={newResource.type}
+                onChange={(e) => setNewResource({...newResource, type: e.target.value as any})}
+                className="w-full bg-[#F5F2E7]/50 border border-[#B2AC88]/30 rounded-xl py-3 px-4 font-serif outline-none focus:border-[#D4AF37] transition-all"
+              >
+                <option value="pdf">PDF Document</option>
+                <option value="video">Video Lecture</option>
+                <option value="link">External Link</option>
+              </select>
+            </div>
 
-          <div className="space-y-2">
-            {newResource.type === 'link' ? (
-              <>
-                <label className="text-[10px] font-bold uppercase tracking-widest text-saddle-brown/60 ml-1">Resource URL</label>
-                <input 
-                  type="url"
-                  placeholder="https://..."
-                  value={newResource.externalUrl}
-                  onChange={(e) => setNewResource({...newResource, externalUrl: e.target.value})}
-                  className="w-full bg-parchment/30 border border-saddle-brown/10 rounded-xl py-3 px-4 font-serif outline-none focus:border-antique-gold transition-all"
-                />
-              </>
-            ) : (
-              <>
-                <label className="text-[10px] font-bold uppercase tracking-widest text-saddle-brown/60 ml-1">Select File</label>
-                <div 
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full bg-parchment/30 border-2 border-dashed border-saddle-brown/20 rounded-xl py-2.5 px-4 flex items-center gap-2 cursor-pointer hover:bg-parchment/50 transition-all"
-                >
-                  <File size={16} className="text-saddle-brown/40" />
-                  <span className="text-xs font-serif text-saddle-brown/60 truncate">
-                    {newResource.file ? newResource.file.name : 'Choose file...'}
-                  </span>
+            <div className="space-y-2">
+              {newResource.type === 'link' ? (
+                <>
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-[#8B4513]/60 ml-1">Resource URL</label>
                   <input 
-                    type="file" 
-                    ref={fileInputRef}
-                    onChange={(e) => setNewResource({...newResource, file: e.target.files?.[0] || null})}
-                    className="hidden" 
+                    type="url"
+                    placeholder="https://..."
+                    value={newResource.externalUrl}
+                    onChange={(e) => setNewResource({...newResource, externalUrl: e.target.value})}
+                    className="w-full bg-[#F5F2E7]/50 border border-[#B2AC88]/30 rounded-xl py-3 px-4 font-serif outline-none focus:border-[#D4AF37] transition-all"
                   />
-                </div>
-              </>
-            )}
+                </>
+              ) : (
+                <>
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-[#8B4513]/60 ml-1">Select File</label>
+                  <div 
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full bg-[#F5F2E7]/50 border-2 border-dashed border-[#B2AC88]/40 rounded-xl py-2.5 px-4 flex items-center gap-2 cursor-pointer hover:bg-white/50 transition-all"
+                  >
+                    <File size={16} className="text-[#8B4513]/40" />
+                    <span className="text-xs font-serif text-[#8B4513]/60 truncate">
+                      {newResource.file ? newResource.file.name : 'Choose file...'}
+                    </span>
+                    <input 
+                      type="file" 
+                      ref={fileInputRef}
+                      onChange={(e) => setNewResource({...newResource, file: e.target.files?.[0] || null})}
+                      className="hidden" 
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-6 flex justify-end">
+            <Button 
+              onClick={handleUpload}
+              disabled={isUploading}
+              className="bg-[#8B4513] hover:bg-[#1A1612] text-[#F5F2E7] rounded-xl px-10 py-6 shadow-lg flex items-center gap-2 disabled:opacity-50"
+            >
+              {isUploading ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-[#F5F2E7]/30 border-t-[#F5F2E7] rounded-full animate-spin" />
+                  Archiving...
+                </>
+              ) : (
+                <>
+                  <Plus size={20} />
+                  Publish to Hub
+                </>
+              )}
+            </Button>
           </div>
         </div>
+      )}
 
-        <div className="mt-6 flex justify-end">
-          <Button 
-            onClick={handleUpload}
-            disabled={isUploading}
-            className="bg-saddle-brown hover:bg-leather text-parchment rounded-xl px-10 py-6 shadow-lg flex items-center gap-2 disabled:opacity-50"
-          >
-            {isUploading ? (
-              <>
-                <div className="w-4 h-4 border-2 border-parchment/30 border-t-parchment rounded-full animate-spin" />
-                Archiving...
-              </>
-            ) : (
-              <>
-                <Plus size={20} />
-                Publish to Hub
-              </>
-            )}
-          </Button>
+      {/* Modern Filter Tabs */}
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center gap-2 overflow-x-auto pb-2 custom-scrollbar">
+          {['All', 'pdf', 'link', 'video'].map((type) => (
+            <button
+              key={type}
+              onClick={() => setActiveType(type)}
+              className={`px-6 py-2.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${
+                activeType === type 
+                  ? 'bg-[#8B4513] text-[#F5F2E7] shadow-lg' 
+                  : 'bg-white/60 text-[#8B4513] border border-[#B2AC88]/20 hover:bg-[#F5F2E7]'
+              }`}
+            >
+              {type === 'All' ? 'Every Scroll' : type === 'pdf' ? 'PDF Archives' : type === 'link' ? 'Web Links' : 'Video Lectures'}
+            </button>
+          ))}
         </div>
-      </div>
-
-      {/* Search and Filters */}
-      <div className="flex flex-col lg:flex-row gap-4 items-center">
-        <div className="relative flex-1 w-full">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-saddle-brown/40" size={18} />
+        
+        <div className="relative w-full">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-[#8B4513]/40" size={18} />
           <input 
             type="text"
-            placeholder="Search by title, category, or type..."
+            placeholder="Search within the Imperial Repository..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-white border-2 border-saddle-brown/10 rounded-2xl py-3.5 pl-12 pr-4 font-serif outline-none focus:border-antique-gold shadow-sm"
+            className="w-full bg-white/60 backdrop-blur-sm border-2 border-[#B2AC88]/20 rounded-2xl py-3.5 pl-12 pr-4 font-serif outline-none focus:border-[#D4AF37] shadow-sm"
           />
-        </div>
-        
-        <div className="flex gap-2 w-full lg:w-auto">
-          <div className="flex items-center gap-2 bg-white border-2 border-saddle-brown/10 rounded-2xl px-4 py-2">
-            <Filter size={14} className="text-saddle-brown/40" />
-            <select 
-              value={activeCategory}
-              onChange={(e) => setActiveCategory(e.target.value)}
-              className="bg-transparent text-xs font-bold uppercase tracking-widest text-saddle-brown outline-none"
-            >
-              {categories.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </div>
-          
-          <div className="flex items-center gap-2 bg-white border-2 border-saddle-brown/10 rounded-2xl px-4 py-2">
-            <div className="w-4 h-4 rounded-full bg-antique-gold/10 flex items-center justify-center">
-              <div className="w-1.5 h-1.5 bg-antique-gold rounded-full" />
-            </div>
-            <select 
-              value={activeType}
-              onChange={(e) => setActiveType(e.target.value)}
-              className="bg-transparent text-xs font-bold uppercase tracking-widest text-saddle-brown outline-none"
-            >
-              {types.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
         </div>
       </div>
 

@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User } from 'firebase/auth';
-import { Sparkles, Send, Bot, User as UserIcon, Loader2, Info } from 'lucide-react';
+import { Sparkles, Send, Bot, User as UserIcon, Loader2, Info, Mic, MicOff, Volume2 } from 'lucide-react';
 import { Button } from './ui/button';
+import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from '@google/genai';
 import ReactMarkdown from 'react-markdown';
 import { db, collection, getDocs, query, orderBy, limit } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 
 interface OracleProps {
   user: User;
@@ -16,7 +18,49 @@ export function Oracle({ user }: OracleProps) {
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isVoiceIntelligence, setIsVoiceIntelligence] = useState(false);
+  const [userContext, setUserContext] = useState<string>('');
   const scrollRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<any>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const userId = (user as any).uid || (user as any).id;
+
+  // Initialize contexts (RAG Memory)
+  useEffect(() => {
+    const fetchUserContext = async () => {
+      if (!userId) return;
+      try {
+        // Fetch latest journal
+        const journalSnap = await getDocs(query(
+          collection(db, `users/${userId}/journals`),
+          orderBy('createdAt', 'desc'),
+          limit(1)
+        ));
+        
+        // Fetch latest study logs
+        const { data: studyLogs } = await supabase
+          .from('study_logs')
+          .select('*')
+          .eq('user_id', userId)
+          .order('date', { ascending: false })
+          .limit(3);
+
+        let context = "";
+        if (!journalSnap.empty) {
+          context += `User's latest journal: ${journalSnap.docs[0].data().content}\n`;
+        }
+        if (studyLogs && studyLogs.length > 0) {
+          context += `Recent Study Sessions: ${studyLogs.map(l => `${l.subject} for ${l.duration_minutes}m`).join(', ')}`;
+        }
+        setUserContext(context);
+      } catch (err) {
+        console.warn("Oracle Context Retrieval Issue:", err);
+      }
+    };
+    fetchUserContext();
+  }, [userId]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -26,34 +70,106 @@ export function Oracle({ user }: OracleProps) {
 
   const fetchContext = async () => {
     try {
-      const q = query(collection(db, 'newsArticles'), orderBy('createdAt', 'desc'), limit(10));
-      const snapshot = await getDocs(q);
-      return snapshot.docs.map(doc => {
-        const data = doc.data();
-        return `Title: ${data.title}\nSource: ${data.source}\nGS Paper: ${data.gsPaper}\nSummary: ${data.summary}\nFacts: ${data.prelimsFacts?.join(', ')}`;
-      }).join('\n\n');
+      const { data, error } = await supabase
+        .from('daily_news')
+        .select('*')
+        .order('relevance_score', { ascending: false })
+        .limit(5);
+
+      if (error) return "";
+      return data?.map(d => `[${d.upsc_category}] ${d.title}: ${d.summary}`).join('\n\n') || "";
     } catch (error) {
       console.error("Context fetch failed", error);
       return "";
     }
   };
 
-  const sendMessage = async () => {
-    if (!input.trim() || isLoading) return;
+  useEffect(() => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.continuous = false;
+      recognitionRef.current.interimResults = false;
+      recognitionRef.current.lang = 'en-IN';
 
-    const userMsg = input.trim();
-    setInput('');
-    setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
-    setIsLoading(true);
-    
-    if (!process.env.VINTAGE_ORACLE_KEY) {
-      setTimeout(() => {
-        setMessages(prev => [...prev, { role: 'bot', content: "Greetings, Aspirant. I am currently operating in **Guest Mode** because the Imperial Oracle Key is not connected. I can still discuss general UPSC strategy, but my deep-dive intelligence is limited.\n\n*Tip: Ask me about GS Paper II preparation!*" }]);
-        setIsLoading(false);
-      }, 1000);
-      return;
+      recognitionRef.current.onresult = (event: any) => {
+        const transcript = event.results[0][0].transcript;
+        setInput(transcript);
+        setIsListening(false);
+        // Automatically send after voice input
+        processMessage(transcript);
+      };
+
+      recognitionRef.current.onend = () => {
+        setIsListening(false);
+      };
+
+      recognitionRef.current.onerror = (event: any) => {
+        console.error("Speech recognition error:", event.error);
+        setIsListening(false);
+      };
     }
 
+    return () => {
+      if (recognitionRef.current) recognitionRef.current.stop();
+      if (audioRef.current) audioRef.current.pause();
+    };
+  }, []);
+
+  const toggleMic = () => {
+    if (isListening) {
+      if (recognitionRef.current) recognitionRef.current.stop();
+      setIsListening(false);
+    } else {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.start();
+          setIsListening(true);
+          if (audioRef.current) {
+            audioRef.current.pause();
+            setIsSpeaking(false);
+          }
+        } catch (err) {
+          console.error("Failed to start speech recognition", err);
+        }
+      } else {
+        alert("Speech recognition is not supported in this browser.");
+      }
+    }
+  };
+
+  const speakText = async (text: string) => {
+    try {
+      setIsSpeaking(true);
+      const endpoint = isVoiceIntelligence ? '/api/tts/elevenlabs' : '/api/tts';
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: text.substring(0, 500) }) 
+      });
+
+      if (!response.ok) throw new Error("TTS failed");
+
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      
+      if (audioRef.current) audioRef.current.pause();
+      audioRef.current = new Audio(audioUrl);
+      audioRef.current.onended = () => setIsSpeaking(false);
+      await audioRef.current.play();
+    } catch (error) {
+      console.error("Audio playback failed", error);
+      setIsSpeaking(false);
+    }
+  };
+
+  const processMessage = async (msgContent: string) => {
+    if (!msgContent.trim() || isLoading) return;
+
+    setMessages(prev => [...prev, { role: 'user', content: msgContent }]);
+    setIsLoading(true);
+    setInput('');
+    
     try {
       const context = await fetchContext();
       const ai = new GoogleGenAI({ apiKey: process.env.VINTAGE_ORACLE_KEY || '' });
@@ -61,25 +177,35 @@ export function Oracle({ user }: OracleProps) {
       const aiResult = await ai.models.generateContent({ 
         model: "gemini-3-flash-preview",
         config: {
-          systemInstruction: `You are a world-class UPSC (Civil Services) mentor. Your tone is scholarly, encouraging, and highly analytical. 
-          You have access to the following recent current affairs context:
+          systemInstruction: `You are Oracle, a high-level UPSC mentor. Use the provided context to guide the user.
           
+          Current Affairs:
           ${context}
           
-          When answering, use this context if relevant. If the student asks about specific recent news, refer to these summaries. 
-          Always relate topics to the UPSC syllabus (GS I-IV). Use bullet points for clarity.`
+          User's Personal Memory:
+          ${userContext}
+          
+          Tone: Scholarly, encouraging, strategic. Reference GS papers where possible.`
         },
-        contents: [{ role: "user", parts: [{ text: userMsg }] }]
+        contents: [{ role: "user", parts: [{ text: msgContent }] }]
       });
 
       const responseText = aiResult.text;
-
-      setMessages(prev => [...prev, { role: 'bot', content: responseText || "The Oracle is momentarily clouded. Please rephrase." }]);
+      setMessages(prev => [...prev, { role: 'bot', content: responseText || "The Oracle is momentarily clouded." }]);
+      if (responseText) speakText(responseText);
     } catch (error) {
-      setMessages(prev => [...prev, { role: 'bot', content: "A disturbance in the archives. Please try again." }]);
+      setMessages(prev => [...prev, { role: 'bot', content: "A disturbance in the archives." }]);
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const sendMessage = async () => {
+    if (!input.trim() || isLoading) return;
+    const msg = input.trim();
+    if (audioRef.current) audioRef.current.pause();
+    setIsSpeaking(false);
+    await processMessage(msg);
   };
 
   return (
@@ -94,9 +220,23 @@ export function Oracle({ user }: OracleProps) {
             <p className="text-[10px] uppercase tracking-widest text-[#5A5A40]/60 font-bold">Imperial AI Mentor</p>
           </div>
         </div>
-        <div className="flex items-center gap-2 px-3 py-1 bg-white rounded-full border border-[#5A5A40]/10">
-          <div className="w-2 h-2 bg-green-500 rounded-full" />
-          <span className="text-[10px] font-bold uppercase tracking-widest text-[#5A5A40]">Ready</span>
+        <div className="flex items-center gap-4">
+          <button 
+            onClick={() => setIsVoiceIntelligence(!isVoiceIntelligence)}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[9px] font-bold uppercase tracking-widest transition-all ${
+              isVoiceIntelligence 
+                ? 'bg-antique-gold text-leather shadow-[0_0_10px_rgba(212,175,55,0.4)]' 
+                : 'bg-leather/5 text-saddle-brown hover:bg-leather/10'
+            }`}
+          >
+            {isVoiceIntelligence ? <Sparkles size={10} /> : <Info size={10} />}
+            {isVoiceIntelligence ? 'Professional Voice' : 'Standard Voice'}
+          </button>
+          
+          <div className="flex items-center gap-2 px-3 py-1 bg-white rounded-full border border-[#5A5A40]/10">
+            <div className="w-2 h-2 bg-green-500 rounded-full" />
+            <span className="text-[10px] font-bold uppercase tracking-widest text-[#5A5A40]">Ready</span>
+          </div>
         </div>
       </div>
 
@@ -132,25 +272,43 @@ export function Oracle({ user }: OracleProps) {
       </div>
 
       <div className="p-6 border-t border-[#5A5A40]/10 bg-[#f5f2ed]/30">
-        <div className="relative">
-          <input 
-            type="text"
-            placeholder="Ask the Oracle about GS Paper II, Ethics, or your progress..."
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-            className="w-full bg-white border border-[#5A5A40]/20 rounded-2xl py-4 pl-6 pr-16 font-serif focus:ring-2 focus:ring-[#5A5A40] outline-none shadow-inner"
-          />
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <input 
+              type="text"
+              placeholder="Ask the Oracle..."
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+              className="w-full bg-white border border-[#5A5A40]/20 rounded-2xl py-4 pl-6 pr-12 font-serif focus:ring-2 focus:ring-[#5A5A40] outline-none shadow-inner"
+            />
+            <button 
+              onClick={sendMessage}
+              disabled={isLoading || !input.trim()}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-2.5 bg-[#5A5A40] text-white rounded-xl hover:bg-[#4A4A30] transition-all disabled:opacity-50 shadow-md"
+            >
+              <Send size={16} />
+            </button>
+          </div>
+          
           <button 
-            onClick={sendMessage}
-            disabled={isLoading || !input.trim()}
-            className="absolute right-3 top-1/2 -translate-y-1/2 p-3 bg-[#5A5A40] text-white rounded-xl hover:bg-[#4A4A30] transition-all disabled:opacity-50 shadow-md"
+            onClick={toggleMic}
+            className={`p-4 rounded-full transition-all flex items-center justify-center relative ${
+              isListening 
+                ? 'bg-red-500 text-white animate-mic-pulse' 
+                : 'bg-white border border-[#5A5A40]/20 text-[#5A5A40] hover:bg-[#5A5A40]/5'
+            }`}
           >
-            <Send size={18} />
+            {isListening ? <Mic size={20} /> : <MicOff size={20} />}
+            {isSpeaking && (
+              <div className="absolute -top-1 -right-1 bg-[#CCFF00] text-[#1B2E22] p-1 rounded-full shadow-sm animate-bounce">
+                <Volume2 size={12} />
+              </div>
+            )}
           </button>
         </div>
         <p className="mt-3 text-[10px] text-center text-[#5A5A40]/40 font-serif italic">
-          AI insights are generated for educational purposes. Cross-reference with official NCERT and PIB sources.
+          Voice of Oracle: Alloy (OpenAI). AI insights for educational guidance.
         </p>
       </div>
     </div>

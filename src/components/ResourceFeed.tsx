@@ -52,12 +52,15 @@ export function ResourceFeed({ user, isAdmin }: ResourceFeedProps) {
   const [newPost, setNewPost] = useState({ title: '', content: '', type: 'article' as const, link: '' });
 
   useEffect(() => {
+    if (!user || !db) return;
     const q = query(collection(db, 'resourcePosts'), orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setPosts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ResourcePost)));
+    }, (error) => {
+      console.error("Resource Feed Listener Error:", error);
     });
     return () => unsubscribe();
-  }, []);
+  }, [user]);
 
   const handleAddPost = async () => {
     if (!newPost.title || !newPost.content) return;

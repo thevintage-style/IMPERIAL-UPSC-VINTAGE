@@ -157,6 +157,19 @@
       },
       "required": ["title", "source", "gsPaper", "summary"]
     },
+    "NewsArchive": {
+      "title": "News Archive",
+      "description": "Historical repository of summarized news categorized by UPSC GS papers.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "source": { "type": "string" },
+        "summary": { "type": "string" },
+        "upsc_category": { "type": "string", "enum": ["GS1", "GS2", "GS3", "GS4"] },
+        "date_published": { "type": "string", "format": "date" }
+      },
+      "required": ["title", "source", "summary", "upsc_category", "date_published"]
+    },
     "Video": {
       "title": "Video",
       "description": "Educational videos and podcasts.",
@@ -237,6 +250,39 @@
         "status": { "type": "string", "enum": ["active", "closed"] }
       },
       "required": ["userId"]
+    },
+    "JournalEntry": {
+      "title": "Journal Entry",
+      "description": "User journal recordings and reflections.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "content"]
+    },
+    "CommunityPost": {
+      "title": "Community Post",
+      "description": "User shared posts in the community.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userPhoto": { "type": "string" },
+        "text": { "type": "string" },
+        "fileUrl": { "type": "string" },
+        "fileType": { "type": "string", "enum": ["pdf", "image", "link", "none"] },
+        "reactions": { 
+          "type": "object",
+          "additionalProperties": { "type": "array", "items": { "type": "string" } }
+        },
+        "replyCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "text", "createdAt"]
     },
     "ChatMessage": {
       "title": "Chat Message",
@@ -340,6 +386,26 @@
     "/resource_hub/{id}": {
       "schema": "ResourceHubItem",
       "description": "Integrated UPSC study materials hub"
+    },
+    "/community_posts/{postId}": {
+      "schema": "CommunityPost",
+      "description": "Community posts with reactions"
+    },
+    "/community_posts/{postId}/comments/{commentId}": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "userId": { "type": "string" },
+          "userName": { "type": "string" },
+          "text": { "type": "string" },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "description": "Comments on community posts"
+    },
+    "/users/{userId}/journals/{journalId}": {
+      "schema": "JournalEntry",
+      "description": "User journal entries"
     }
   }
 }
