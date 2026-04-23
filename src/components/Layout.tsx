@@ -23,7 +23,8 @@ import {
   BookOpen,
   Gavel,
   Archive,
-  Star
+  Star,
+  Settings
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SocialSidebar } from './SocialSidebar';
@@ -83,9 +84,10 @@ export function Layout({ user, activeTab, setActiveTab, children }: LayoutProps)
   ];
 
   if (user?.email === "raksha05jk.rao@gmail.com") {
+    navItems.push({ id: 'vizier-control', label: 'Vizier Control', icon: Shield });
     navItems.push({ id: 'vizier-studio', label: 'Vizier Forge', icon: Cpu });
     navItems.push({ id: 'rules', label: 'Regulation Vault', icon: Gavel });
-    navItems.push({ id: 'owner-settings', label: 'Vizier', icon: Shield });
+    navItems.push({ id: 'owner-settings', label: 'Owner Logic', icon: Settings });
   }
 
   return (

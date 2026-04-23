@@ -22,10 +22,51 @@ export function Oracle({ user }: OracleProps) {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isVoiceIntelligence, setIsVoiceIntelligence] = useState(false);
   const [userContext, setUserContext] = useState<string>('');
+  const [isDeepListen, setIsDeepListen] = useState(false);
+  const [wakeWordActive, setWakeWordActive] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
+  const wakeWordRecognitionRef = useRef<any>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const userId = (user as any).uid || (user as any).id;
+
+  // Wake-Word Listener (Oracle)
+  useEffect(() => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (SpeechRecognition && !wakeWordActive) {
+      wakeWordRecognitionRef.current = new SpeechRecognition();
+      wakeWordRecognitionRef.current.continuous = true;
+      wakeWordRecognitionRef.current.interimResults = false;
+      wakeWordRecognitionRef.current.lang = 'en-US';
+
+      wakeWordRecognitionRef.current.onresult = (event: any) => {
+        const last = event.results.length - 1;
+        const text = event.results[last][0].transcript.toLowerCase();
+        if (text.includes('oracle')) {
+          activateDeepListen();
+        }
+      };
+
+      try {
+        wakeWordRecognitionRef.current.start();
+        setWakeWordActive(true);
+      } catch (e) {
+        console.warn("Wake-word listener couldn't start automatically.");
+      }
+    }
+
+    return () => {
+      if (wakeWordRecognitionRef.current) wakeWordRecognitionRef.current.stop();
+    };
+  }, [wakeWordActive]);
+
+  const activateDeepListen = () => {
+    setIsDeepListen(true);
+    speakText("I am listening, Scholar.");
+    setTimeout(() => {
+      toggleMic(true);
+    }, 1500);
+  };
 
   // Initialize contexts (RAG Memory)
   useEffect(() => {
@@ -116,15 +157,17 @@ export function Oracle({ user }: OracleProps) {
     };
   }, []);
 
-  const toggleMic = () => {
-    if (isListening) {
+  const toggleMic = (forceStart = false) => {
+    if (isListening && !forceStart) {
       if (recognitionRef.current) recognitionRef.current.stop();
       setIsListening(false);
+      setIsDeepListen(false);
     } else {
       if (recognitionRef.current) {
         try {
           recognitionRef.current.start();
           setIsListening(true);
+          setIsDeepListen(true);
           if (audioRef.current) {
             audioRef.current.pause();
             setIsSpeaking(false);
@@ -197,6 +240,7 @@ export function Oracle({ user }: OracleProps) {
       setMessages(prev => [...prev, { role: 'bot', content: "A disturbance in the archives." }]);
     } finally {
       setIsLoading(false);
+      setIsDeepListen(false);
     }
   };
 
@@ -209,8 +253,31 @@ export function Oracle({ user }: OracleProps) {
   };
 
   return (
-    <div className="h-full flex flex-col bg-white rounded-3xl border border-[#5A5A40]/10 shadow-sm overflow-hidden">
-      <div className="p-6 border-b border-[#5A5A40]/10 bg-[#5A5A40]/5 flex items-center justify-between">
+    <div className={`h-full flex flex-col bg-white rounded-3xl border border-[#5A5A40]/10 shadow-sm overflow-hidden transition-all duration-700 relative ${
+      isDeepListen ? 'ring-[20px] ring-sage/20 scale-[0.99] z-50' : ''
+    }`}>
+      <AnimatePresence>
+        {isDeepListen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 bg-sage/5 z-0 pointer-events-none overflow-hidden"
+          >
+            <div className="absolute inset-0 bg-gradient-to-t from-sage/20 to-transparent animate-pulse" />
+            <motion.div 
+              animate={{ 
+                scale: [1, 1.2, 1],
+                opacity: [0.1, 0.3, 0.1]
+              }}
+              transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-sage rounded-full blur-[120px]"
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className="p-6 border-b border-[#5A5A40]/10 bg-[#5A5A40]/5 flex items-center justify-between relative z-10">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-[#5A5A40] rounded-2xl flex items-center justify-center shadow-md">
             <Sparkles className="text-white" size={20} />
@@ -234,8 +301,8 @@ export function Oracle({ user }: OracleProps) {
           </button>
           
           <div className="flex items-center gap-2 px-3 py-1 bg-white rounded-full border border-[#5A5A40]/10">
-            <div className="w-2 h-2 bg-green-500 rounded-full" />
-            <span className="text-[10px] font-bold uppercase tracking-widest text-[#5A5A40]">Ready</span>
+            <div className={`w-2 h-2 rounded-full ${isDeepListen ? 'bg-red-500 animate-ping' : 'bg-green-500'}`} />
+            <span className="text-[10px] font-bold uppercase tracking-widest text-[#5A5A40]">{isDeepListen ? 'Listening' : 'Ready'}</span>
           </div>
         </div>
       </div>
@@ -292,7 +359,7 @@ export function Oracle({ user }: OracleProps) {
           </div>
           
           <button 
-            onClick={toggleMic}
+            onClick={() => toggleMic()}
             className={`p-4 rounded-full transition-all flex items-center justify-center relative ${
               isListening 
                 ? 'bg-red-500 text-white animate-mic-pulse' 

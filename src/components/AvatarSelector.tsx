@@ -1,6 +1,15 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Shield, Star, Award, User, Check, LucideIcon } from 'lucide-react';
+import { 
+  Shield, 
+  Star, 
+  Award, 
+  User, 
+  Check, 
+  LucideIcon,
+  Globe,
+  Briefcase
+} from 'lucide-react';
 import { Button } from './ui/button';
 
 interface AvatarOption {
@@ -17,25 +26,25 @@ const AVATARS: AvatarOption[] = [
     id: 'ias-classic',
     name: 'District Magistrate',
     service: 'IAS',
-    color: '#8B4513',
-    icon: Award,
-    description: 'The classic administrative uniform of the Indian Administrative Service.'
+    color: '#1B2E22',
+    icon: Briefcase,
+    description: 'The standard of administration. Formal attire with a focus on governance and policy.'
   },
   {
     id: 'ips-officer',
     name: 'Superintendent',
     service: 'IPS',
-    color: '#1A1612',
+    color: '#8B4513',
     icon: Shield,
-    description: 'The khaki uniform representing the Indian Police Service.'
+    description: 'The khakhi silhouette. Uniformed elegance representing discipline, law, and order.'
   },
   {
     id: 'ifs-diplomat',
     name: 'Ambassador',
     service: 'IFS',
     color: '#D4AF37',
-    icon: Star,
-    description: 'The formal attire of the Indian Foreign Service.'
+    icon: Globe,
+    description: 'The global representative. Formal suits with a backdrop of international relations.'
   },
   {
     id: 'admin-skin',
@@ -43,7 +52,7 @@ const AVATARS: AvatarOption[] = [
     service: 'Admin',
     color: '#5A5A40',
     icon: User,
-    description: 'Exclusive skin for the platform administrators.'
+    description: 'Exclusive skin for the platform architects.'
   }
 ];
 

@@ -16,22 +16,27 @@ export function SocialSidebar() {
       <div className="relative flex flex-col items-center">
         <AnimatePresence>
           {isOpen && (
-            <div className="absolute bottom-full mb-4 flex flex-col gap-4 items-center">
+            <div className="absolute bottom-full mb-4 flex items-center justify-center pointer-events-none">
               {socialLinks.map((link, idx) => (
                 <motion.a
                   key={link.label}
                   href={link.href}
                   target="_blank"
                   rel="noopener noreferrer"
-                  initial={{ y: 20, opacity: 0, scale: 0.5 }}
-                  animate={{ y: 0, opacity: 1, scale: 1 }}
-                  exit={{ y: 20, opacity: 0, scale: 0.5 }}
-                  transition={{ delay: idx * 0.1, type: "spring", stiffness: 300, damping: 20 }}
-                  whileHover={{ scale: 1.2 }}
-                  className={`${link.color} text-white w-12 h-12 rounded-full shadow-2xl flex items-center justify-center group relative border-2 border-white/20`}
+                  initial={{ y: 20, x: 0, opacity: 0, scale: 0.5 }}
+                  animate={{ 
+                    y: -60 - (idx * 20), 
+                    x: -60 * (idx + 1), // Fan out to the left
+                    opacity: 1, 
+                    scale: 1 
+                  }}
+                  exit={{ y: 20, x: 0, opacity: 0, scale: 0.5 }}
+                  transition={{ delay: idx * 0.05, type: "spring", stiffness: 400, damping: 25 }}
+                  whileHover={{ scale: 1.3, rotate: 5 }}
+                  className={`${link.color} pointer-events-auto text-white w-12 h-12 rounded-full shadow-2xl flex items-center justify-center group relative border-2 border-white/20`}
                 >
                   {link.icon}
-                  <span className="absolute right-full mr-4 px-3 py-1 bg-leather text-lime text-[8px] font-bold uppercase tracking-widest rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-xl border border-lime/20 backdrop-blur-md">
+                  <span className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 px-2 py-1 bg-leather text-antique-gold text-[8px] font-bold uppercase tracking-widest rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-xl border border-antique-gold/20 backdrop-blur-md">
                     {link.label}
                   </span>
                 </motion.a>

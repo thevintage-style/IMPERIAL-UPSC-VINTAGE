@@ -22,6 +22,7 @@ import { SocialSidebar } from './components/SocialSidebar';
 import { RulesAndRegulations } from './components/RulesAndRegulations';
 import { VedicDashboard } from './components/VedicDashboard';
 import { PersonalVault } from './components/PersonalVault';
+import { VizierControl } from './components/VizierControl';
 import { Button } from './components/ui/button';
 import { LogIn, BookOpen } from 'lucide-react';
 
@@ -296,6 +297,7 @@ export default function App() {
       {activeTab === 'support' && <Support user={user as any} />}
       {activeTab === 'profile' && <Profile user={user as any} />}
       {activeTab === 'vizier-studio' && <VizierStudio user={user as any} />}
+      {activeTab === 'vizier-control' && isAdmin && <VizierControl user={user as any} />}
       {activeTab === 'community' && <Community user={user as any} isAdmin={isAdmin} />}
       {activeTab === 'peer-chat' && <PeerChat user={user as any} />}
       {activeTab === 'rules' && isAdmin && <RulesAndRegulations user={user as any} />}
