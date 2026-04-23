@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SocialSidebar } from './SocialSidebar';
-import { OracleFloating } from './OracleFloating';
+import { OracleOS } from './OracleOS';
 import { db, collection, onSnapshot, query, where, doc } from '../lib/firebase';
 import { cn } from '../lib/utils';
 
@@ -89,12 +89,12 @@ export function Layout({ user, activeTab, setActiveTab, children }: LayoutProps)
   }
 
   return (
-    <div className="min-h-screen bg-[#f5f2ed] flex font-sans text-[#1a1a1a]">
+    <div className="min-h-screen bg-[#f5f2ed] flex font-sans text-leather">
       {/* Sidebar */}
       <motion.aside 
         initial={false}
         animate={{ width: isSidebarOpen ? 280 : 80 }}
-        className="bg-white border-r border-[#5A5A40]/20 flex flex-col shadow-sm z-20"
+        className="bg-white border-r border-leather/20 flex flex-col shadow-sm z-20"
       >
         <div className="p-6 flex items-center justify-between">
           {isSidebarOpen && (
@@ -104,16 +104,16 @@ export function Layout({ user, activeTab, setActiveTab, children }: LayoutProps)
               className="flex flex-col gap-1"
             >
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 bg-[#5A5A40] rounded-lg flex items-center justify-center shadow-sm">
-                  <span className="text-white font-serif font-bold">I</span>
+                <div className="w-8 h-8 bg-leather rounded-lg flex items-center justify-center shadow-sm">
+                  <span className="text-parchment font-serif font-bold">I</span>
                 </div>
                 <span className="font-serif font-bold text-lg tracking-tight">Imperial</span>
               </div>
               <div className="mt-2">
-                <p className="text-[10px] font-serif font-bold text-[#D4AF37] tracking-[0.2em] uppercase gold-leaf-text">
+                <p className="text-[10px] font-serif font-bold text-sage tracking-[0.2em] uppercase gold-leaf-text">
                   सत्यमेव जयते
                 </p>
-                <p className="text-[8px] font-serif italic text-[#5A5A40]/60 uppercase tracking-widest">
+                <p className="text-[8px] font-serif italic text-leather/60 uppercase tracking-widest">
                   Truth Alone Triumphs
                 </p>
               </div>
@@ -121,57 +121,60 @@ export function Layout({ user, activeTab, setActiveTab, children }: LayoutProps)
           )}
           <button 
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="p-2 hover:bg-[#f5f2ed] rounded-lg transition-colors text-[#5A5A40]"
+            className="p-2 hover:bg-parchment rounded-lg transition-colors text-leather"
           >
             {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
           </button>
         </div>
 
-        <nav className="flex-1 px-4 py-4 space-y-2">
+        <nav className="flex-1 px-4 py-4 space-y-1">
           {navItems.map((item) => (
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
               className={cn(
-                "w-full flex items-center gap-4 p-3 rounded-xl transition-all duration-200 group",
+                "w-full flex items-center gap-4 p-3 rounded-xl transition-all duration-200 group relative",
                 activeTab === item.id 
-                  ? "bg-[#5A5A40] text-white shadow-md" 
-                  : "hover:bg-[#f5f2ed] text-[#5A5A40]"
+                  ? "bg-leather text-parchment shadow-md" 
+                  : "hover:bg-parchment text-leather/60 hover:text-leather"
               )}
             >
-              <item.icon size={22} className={cn(activeTab === item.id ? "text-white" : "group-hover:scale-110 transition-transform")} />
+              <item.icon size={20} className={cn(activeTab === item.id ? "text-lime" : "group-hover:scale-110 transition-transform")} />
               {isSidebarOpen && (
-                <span className="font-serif font-medium tracking-wide">{item.label}</span>
+                <span className="font-serif font-medium tracking-wide text-xs">{item.label}</span>
+              )}
+              {activeTab === item.id && (
+                <motion.div layoutId="nav-glow" className="absolute inset-0 bg-lime/5 rounded-xl border border-lime/20 pointer-events-none" />
               )}
             </button>
           ))}
         </nav>
 
-        <div className="p-4 border-t border-[#5A5A40]/10">
+        <div className="p-4 border-t border-leather/10">
           <button 
             onClick={() => setActiveTab('profile')}
             className={cn(
               "w-full flex items-center gap-3 p-2 mb-4 rounded-xl transition-all",
-              activeTab === 'profile' ? "bg-saddle-brown/10 border border-saddle-brown/20" : "hover:bg-parchment"
+              activeTab === 'profile' ? "bg-leather/5 border border-leather/20" : "hover:bg-parchment"
             )}
           >
             <div className="relative">
               <img 
                 src={(user as any).photoURL || (user as any).user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${(user as any).uid || (user as any).id}`} 
                 alt="Profile" 
-                className="w-10 h-10 rounded-full border-2 border-[#5A5A40]/20"
+                className="w-10 h-10 rounded-full border-2 border-leather/20 shadow-sm"
                 referrerPolicy="no-referrer"
               />
               {userProfile?.avatarId && (
-                <div className="absolute -bottom-1 -right-1 bg-antique-gold p-0.5 rounded-full shadow-sm border border-white">
+                <div className="absolute -bottom-1 -right-1 bg-lime p-0.5 rounded-full shadow-sm border border-white">
                   <Star size={8} className="text-leather" />
                 </div>
               )}
             </div>
             {isSidebarOpen && (
               <div className="flex flex-col overflow-hidden text-left">
-                <span className="text-sm font-bold truncate">{userProfile?.displayName || (user as any).displayName || (user as any).user_metadata?.full_name}</span>
-                <span className="text-xs text-[#5A5A40]/60 truncate italic font-serif">
+                <span className="text-sm font-bold truncate text-leather">{userProfile?.displayName || (user as any).displayName || (user as any).user_metadata?.full_name}</span>
+                <span className="text-[10px] text-leather/60 truncate italic font-serif uppercase tracking-widest font-bold">
                   {userProfile?.avatarId ? userProfile.avatarId.split('-')[0].toUpperCase() : 'Aspirant'}
                 </span>
               </div>
@@ -194,9 +197,9 @@ export function Layout({ user, activeTab, setActiveTab, children }: LayoutProps)
       </motion.aside>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col h-screen overflow-hidden relative">
+      <main className="flex-1 flex flex-col h-screen overflow-hidden relative bg-[#F5F2E7]/30">
         {activeOffers.length > 0 && (
-          <div className="bg-[#5A5A40] text-white py-2 px-4 flex items-center justify-center gap-4 overflow-hidden whitespace-nowrap">
+          <div className="bg-leather text-parchment py-2 px-4 flex items-center justify-center gap-4 overflow-hidden whitespace-nowrap border-b border-white/10">
             <AnimatePresence mode="wait">
               <motion.div
                 key={activeOffers[0].id}
@@ -205,13 +208,13 @@ export function Layout({ user, activeTab, setActiveTab, children }: LayoutProps)
                 exit={{ y: -20, opacity: 0 }}
                 className="flex items-center gap-2"
               >
-                <Zap size={14} className="text-yellow-400" />
-                <span className="text-xs font-bold uppercase tracking-widest">
-                  Limited Offer: Use code <span className="text-yellow-400">{activeOffers[0].code}</span> for {activeOffers[0].discountPercentage}% off!
+                <Zap size={14} className="text-lime animate-pulse" />
+                <span className="text-[10px] font-bold uppercase tracking-[0.2em]">
+                  Limited Offer: Use code <span className="text-lime">{activeOffers[0].code}</span> for {activeOffers[0].discountPercentage}% off!
                 </span>
                 <button 
                   onClick={() => setActiveTab('subscription')}
-                  className="text-[10px] font-bold underline ml-2 hover:text-yellow-400 transition-colors"
+                  className="text-[10px] font-bold underline ml-2 hover:text-lime transition-colors"
                 >
                   Claim Now
                 </button>
@@ -219,36 +222,25 @@ export function Layout({ user, activeTab, setActiveTab, children }: LayoutProps)
             </AnimatePresence>
           </div>
         )}
-        <header className="h-16 bg-white/80 backdrop-blur-md border-bottom border-[#5A5A40]/10 flex items-center justify-between px-8 z-10">
+        <header className="h-16 bg-white/40 backdrop-blur-xl border-b border-leather/10 flex items-center justify-between px-8 z-10">
           <div className="flex items-center gap-4">
-            <h2 className="font-serif text-xl font-bold text-[#1a1a1a]">
+            <h2 className="font-serif text-xl font-bold text-leather">
               {navItems.find(i => i.id === activeTab)?.label}
             </h2>
-            <div className="h-4 w-[1px] bg-[#5A5A40]/20" />
-            <span className="text-xs font-serif italic text-[#5A5A40]/60">
+            <div className="h-4 w-[1px] bg-leather/20" />
+            <span className="text-[10px] font-serif font-bold uppercase tracking-widest text-leather/40">
               {new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
             </span>
           </div>
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 px-3 py-1 bg-[#5A5A40]/5 rounded-full border border-[#5A5A40]/10">
-              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-              <span className="text-[10px] font-bold uppercase tracking-widest text-[#5A5A40]">Archives Live</span>
+            <div className="flex items-center gap-2 px-3 py-1 bg-leather/5 rounded-full border border-leather/10">
+              <div className="w-2 h-2 bg-lime rounded-full animate-pulse" />
+              <span className="text-[10px] font-bold uppercase tracking-widest text-leather">Archives Live</span>
             </div>
           </div>
         </header>
 
-        {/* Imperial Social Sidebar - Bottom Right */}
-        <div className="fixed bottom-8 right-10 z-[6000] pointer-events-none">
-          <motion.div 
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            className="pointer-events-auto"
-          >
-            <SocialSidebar />
-          </motion.div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto p-8 custom-scrollbar relative">
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}
@@ -264,7 +256,7 @@ export function Layout({ user, activeTab, setActiveTab, children }: LayoutProps)
         </div>
       </main>
 
-      <OracleFloating user={user} />
+      <OracleOS user={user as any} />
 
       <style>{`
         .gold-leaf-text {

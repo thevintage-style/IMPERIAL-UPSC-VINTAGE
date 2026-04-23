@@ -54,8 +54,10 @@ export function Community({ user, isAdmin }: CommunityProps) {
   const [inputText, setInputText] = useState('');
   const [isFiltering, setIsFiltering] = useState(false);
   const [reportingMsg, setReportingMsg] = useState<Message | null>(null);
-  const [view, setView] = useState<'chat' | 'dashboard'>('chat');
+  const [view, setView] = useState<'chat' | 'square' | 'dashboard'>('chat');
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const adminChatId = "ADMIN_HUB";
 
   useEffect(() => {
     const q = query(
@@ -172,18 +174,39 @@ export function Community({ user, isAdmin }: CommunityProps) {
   return (
     <div className="h-full flex flex-col bg-parchment/50 rounded-3xl border-2 border-saddle-brown/20 overflow-hidden shadow-inner">
       {/* View Toggle */}
-      <div className="flex bg-white border-b border-saddle-brown/10 p-2">
+      <div className="flex bg-white border-b border-leather/10 p-2">
         <button 
           onClick={() => setView('chat')}
-          className={`flex-1 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${view === 'chat' ? 'bg-saddle-brown text-parchment shadow-md' : 'text-saddle-brown/40 hover:text-saddle-brown'}`}
+          className={`flex-1 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${view === 'chat' ? 'bg-leather text-parchment shadow-md' : 'text-leather/40 hover:text-leather'}`}
         >
           Imperial Chat
         </button>
         <button 
+          onClick={() => setView('square')}
+          className={`flex-1 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${view === 'square' ? 'bg-leather text-parchment shadow-md' : 'text-leather/40 hover:text-leather'}`}
+        >
+          Community Square
+        </button>
+        <button 
           onClick={() => setView('dashboard')}
-          className={`flex-1 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${view === 'dashboard' ? 'bg-saddle-brown text-parchment shadow-md' : 'text-saddle-brown/40 hover:text-saddle-brown'}`}
+          className={`flex-1 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${view === 'dashboard' ? 'bg-leather text-parchment shadow-md' : 'text-leather/40 hover:text-leather'}`}
         >
           Community Dashboard
+        </button>
+      </div>
+
+      <div className="bg-antique-gold/10 p-4 flex items-center justify-between border-b border-leather/10">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-leather rounded-full flex items-center justify-center text-parchment shadow-md border-2 border-white">
+            <ShieldAlert size={20} className="text-lime" />
+          </div>
+          <div>
+            <h4 className="text-xs font-bold uppercase tracking-widest text-leather">Imperial Admin Hub</h4>
+            <p className="text-[10px] font-serif italic text-leather/60">Official Support & Proclamations</p>
+          </div>
+        </div>
+        <button className="px-4 py-2 bg-leather text-parchment text-[10px] font-bold uppercase tracking-[0.2em] rounded-lg shadow-sm hover:bg-black transition-all">
+          Join Official Chat
         </button>
       </div>
 
@@ -232,6 +255,49 @@ export function Community({ user, isAdmin }: CommunityProps) {
               </ul>
             </div>
             <Sparkles className="absolute -right-10 -bottom-10 w-48 h-48 text-parchment/5 rotate-12" />
+          </div>
+        </div>
+      ) : view === 'square' ? (
+        <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            {messages.slice().reverse().map((msg) => (
+              <motion.div
+                key={msg.id}
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="bg-white rounded-[32px] border border-leather/10 p-6 shadow-lg hover:shadow-xl transition-all group overflow-hidden relative"
+              >
+                <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
+                  <MessageSquare size={80} />
+                </div>
+                
+                <div className="flex items-center gap-3 mb-4">
+                  <img src={msg.senderPhoto || `https://api.dicebear.com/7.x/avataaars/svg?seed=${msg.senderId}`} className="w-8 h-8 rounded-full border border-leather/10" alt="" />
+                  <div>
+                    <h5 className="text-[10px] font-bold uppercase tracking-widest text-leather">{msg.senderName}</h5>
+                    <p className="text-[8px] font-serif italic text-leather/40">Posted on {msg.createdAt?.toDate().toLocaleDateString()}</p>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <p className="text-sm font-serif leading-relaxed text-leather/80 group-hover:text-leather transition-colors h-24 overflow-hidden line-clamp-4">
+                    {msg.text}
+                  </p>
+                  
+                  <div className="flex items-center gap-2 pt-4 border-t border-leather/5">
+                    <button onClick={() => handleReaction(msg.id, '🔥')} className="px-3 py-1 bg-parchment/50 rounded-full text-[10px] font-bold text-leather flex items-center gap-1 hover:bg-orange-100 transition-colors">
+                      🔥 {msg.reactions?.['🔥'] || 0}
+                    </button>
+                    <button onClick={() => handleReaction(msg.id, '📜')} className="px-3 py-1 bg-parchment/50 rounded-full text-[10px] font-bold text-leather flex items-center gap-1 hover:bg-blue-100 transition-colors">
+                      📜 {msg.reactions?.['📜'] || 0}
+                    </button>
+                    <button onClick={() => handleReaction(msg.id, '💡')} className="px-3 py-1 bg-parchment/50 rounded-full text-[10px] font-bold text-leather flex items-center gap-1 hover:bg-yellow-100 transition-colors">
+                      💡 {msg.reactions?.['💡'] || 0}
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            ))}
           </div>
         </div>
       ) : (

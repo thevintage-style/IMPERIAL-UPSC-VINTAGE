@@ -139,23 +139,49 @@ export function VedicDashboard({ user, setActiveTab }: VedicDashboardProps) {
         </div>
 
         {/* Quick Stats */}
-        <div className="bg-parchment/50 rounded-[40px] border-2 border-saddle-brown/10 p-8 shadow-inner">
-          <h3 className="text-lg font-serif font-bold text-saddle-brown mb-6 flex items-center gap-2">
-            <TrendingUp size={20} />
-            Scholarly Progress
-          </h3>
-          <div className="space-y-4">
-            {stats.map((stat, idx) => (
-              <div key={idx} className="bg-white p-4 rounded-2xl border border-saddle-brown/5 flex items-center justify-between group hover:border-antique-gold/30 transition-all">
-                <div className="flex items-center gap-3">
-                  <div className={`p-2 rounded-xl bg-white shadow-sm ${stat.color}`}>
-                    <stat.icon size={20} />
-                  </div>
-                  <span className="text-sm font-serif text-leather/60">{stat.label}</span>
-                </div>
-                <span className="text-lg font-bold text-leather">{stat.value}</span>
+        <div className="bg-parchment/50 rounded-[40px] border-2 border-saddle-brown/10 p-8 shadow-inner flex flex-col justify-between">
+          <div>
+            <h3 className="text-lg font-serif font-bold text-saddle-brown mb-6 flex items-center gap-2">
+              <TrendingUp size={20} />
+              Scholarly Progress
+            </h3>
+            
+            {/* Visual Progress Bar */}
+            <div className="mb-8 space-y-3">
+              <div className="flex justify-between items-end">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-leather/60">Syllabus Completion</span>
+                <span className="text-xl font-bold text-leather">64%</span>
               </div>
-            ))}
+              <div className="h-4 w-full bg-leather/10 rounded-full overflow-hidden border border-leather/5">
+                <motion.div 
+                  initial={{ width: 0 }}
+                  animate={{ width: '64%' }}
+                  transition={{ duration: 1.5, ease: "easeOut" }}
+                  className="h-full bg-gradient-to-r from-leather to-sage relative"
+                >
+                  <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-20" />
+                  <motion.div 
+                    animate={{ x: ['-100%', '100%'] }}
+                    transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+                    className="absolute inset-y-0 w-1/2 bg-gradient-to-r from-transparent via-white/20 to-transparent skew-x-12"
+                  />
+                </motion.div>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              {stats.map((stat, idx) => (
+                <div key={idx} className="bg-white p-4 rounded-2xl border border-saddle-brown/5 flex items-center justify-between group hover:border-antique-gold/30 transition-all">
+                  <div className="flex items-center gap-3">
+                    <div className={`p-2 rounded-xl bg-white shadow-sm ${stat.color}`}>
+                      <stat.icon size={20} />
+                    </div>
+                    <span className="text-sm font-serif text-leather/60">{stat.label}</span>
+                  </div>
+                  <span className="text-lg font-bold text-leather">{stat.value}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>

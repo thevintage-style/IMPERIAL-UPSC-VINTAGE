@@ -164,10 +164,15 @@ export function NewsDesk({ user }: NewsDeskProps) {
               
               <div className="flex items-center justify-between mb-6">
                 <div className="flex gap-2">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-[#5A5A40] bg-[#5A5A40]/5 px-3 py-1 rounded-full border border-[#5A5A40]/10">
-                    {item.source}
-                  </span>
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-white bg-[#5A5A40] px-3 py-1 rounded-full">
+                  <div className="flex items-center gap-2 bg-leather/5 px-3 py-1 rounded-full border border-leather/10">
+                    {item.source === 'The Hindu' && <div className="w-2 h-2 rounded-full bg-blue-800" />}
+                    {item.source === 'Indian Express' && <div className="w-2 h-2 rounded-full bg-red-600" />}
+                    {item.source === 'PIB' && <div className="w-2 h-2 rounded-full bg-green-600" />}
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-leather">
+                      {item.source}
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-parchment bg-leather/80 px-3 py-1 rounded-full border border-white/10 backdrop-blur-sm">
                     {item.gsPaper}
                   </span>
                 </div>
@@ -175,18 +180,18 @@ export function NewsDesk({ user }: NewsDeskProps) {
                   <button 
                     onClick={() => handleAIAnalysis(item)}
                     disabled={analyzingId === item.id}
-                    className={`text-[#D4AF37] hover:text-[#B8860B] transition-colors ${analyzingId === item.id ? 'animate-spin' : ''}`}
-                    title="AI Deep Analysis"
+                    className={`p-2 rounded-xl border border-lime/20 bg-lime/5 text-lime hover:bg-lime hover:text-leather transition-all group/btn ${analyzingId === item.id ? 'animate-pulse' : ''}`}
+                    title="Oracle Summary"
                   >
-                    <Sparkles size={18} />
+                    <Sparkles size={16} className={analyzingId === item.id ? 'animate-spin' : 'group-hover/btn:rotate-12 transition-transform'} />
                   </button>
-                  <button className="text-[#5A5A40]/40 hover:text-[#5A5A40] transition-colors">
-                    <Bookmark size={18} />
+                  <button className="p-2 rounded-xl border border-leather/10 text-leather/40 hover:text-leather hover:bg-parchment transition-all">
+                    <Bookmark size={16} />
                   </button>
                 </div>
               </div>
 
-              <h4 className="font-serif font-bold text-xl mb-4 leading-snug group-hover:text-[#5A5A40] transition-colors">
+              <h4 className="font-serif font-bold text-xl mb-4 leading-snug group-hover:text-leather transition-colors">
                 {item.title}
               </h4>
 

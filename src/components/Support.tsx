@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User } from 'firebase/auth';
 import { db, collection, query, onSnapshot, addDoc, serverTimestamp, OperationType, handleFirestoreError, orderBy, where, limit } from '../lib/firebase';
-import { Send, MessageSquare, Heart, Phone, Mail, Sparkles, User as UserIcon, Shield } from 'lucide-react';
+import { Send, MessageSquare, Heart, Phone, Mail, Sparkles, User as UserIcon, Shield, Zap } from 'lucide-react';
 import { Button } from './ui/button';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
@@ -13,12 +13,39 @@ interface SupportProps {
 export function Support({ user }: SupportProps) {
   const [messages, setMessages] = useState<any[]>([]);
   const [newMessage, setNewMessage] = useState('');
-  const [activeTab, setActiveTab] = useState<'chat' | 'feedback'>('chat');
+  const [view, setView] = useState<'chat' | 'tickets' | 'feedback'>('chat');
+  const [ticketIssue, setTicketIssue] = useState('');
+  const [isGeneratingTicket, setIsGeneratingTicket] = useState(false);
   const [isAIThinking, setIsAIThinking] = useState(false);
   const [chatId, setChatId] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const ai = new GoogleGenAI({ apiKey: process.env.VINTAGE_ORACLE_KEY || "" });
+
+  const handleReportBug = async () => {
+    if (!ticketIssue.trim()) return;
+    setIsGeneratingTicket(true);
+    
+    try {
+      const ticketId = `TIC-${Math.floor(100000 + Math.random() * 900000)}`;
+      const path = 'supportTickets';
+      await addDoc(collection(db, path), {
+        userId: user.uid,
+        userName: user.displayName,
+        issue: ticketIssue,
+        ticketId,
+        status: 'open',
+        createdAt: serverTimestamp()
+      });
+
+      alert(`The Vizier has issued Ticket #${ticketId}. Your concerns have been inscribed in the Imperial Ledger.`);
+      setTicketIssue('');
+    } catch (error) {
+       console.error("Ticket Error:", error);
+    } finally {
+      setIsGeneratingTicket(false);
+    }
+  };
 
   useEffect(() => {
     // Find or create chat session
@@ -151,34 +178,30 @@ export function Support({ user }: SupportProps) {
         <p className="text-[#5A5A40] font-serif italic text-lg">The Grand Vizier's ears are always open to his scholars.</p>
       </div>
 
-      <div className="flex-1 bg-white rounded-[40px] border border-[#5A5A40]/10 shadow-2xl flex flex-col overflow-hidden">
+      <div className="flex-1 bg-white rounded-[40px] border border-leather/10 shadow-2xl flex flex-col overflow-hidden">
         {/* Tabs */}
-        <div className="flex border-b border-[#5A5A40]/5">
-          <button 
-            onClick={() => setActiveTab('chat')}
-            className={`flex-1 py-4 font-serif font-bold text-sm transition-all ${activeTab === 'chat' ? 'bg-[#5A5A40] text-white' : 'hover:bg-[#f5f2ed] text-[#5A5A40]'}`}
-          >
-            <div className="flex items-center justify-center gap-2">
-              <MessageSquare size={18} />
-              Imperial Chat
-            </div>
-          </button>
-          <button 
-            onClick={() => setActiveTab('feedback')}
-            className={`flex-1 py-4 font-serif font-bold text-sm transition-all ${activeTab === 'feedback' ? 'bg-[#5A5A40] text-white' : 'hover:bg-[#f5f2ed] text-[#5A5A40]'}`}
-          >
-            <div className="flex items-center justify-center gap-2">
-              <Heart size={18} />
-              Scholarly Feedback
-            </div>
-          </button>
+        <div className="flex border-b border-leather/5">
+          {[
+            { id: 'chat', label: 'Imperial Chat', icon: MessageSquare },
+            { id: 'tickets', label: 'Issue Tickets', icon: Shield },
+            { id: 'feedback', label: 'Feedback', icon: Heart },
+          ].map(tab => (
+            <button 
+              key={tab.id}
+              onClick={() => setView(tab.id as any)}
+              className={`flex-1 py-4 font-serif font-bold text-xs transition-all flex items-center justify-center gap-2 ${view === tab.id ? 'bg-leather text-parchment' : 'hover:bg-parchment text-leather/40'}`}
+            >
+              <tab.icon size={16} />
+              {tab.label}
+            </button>
+          ))}
         </div>
 
-        {activeTab === 'chat' ? (
+        {view === 'chat' ? (
           <div className="flex-1 flex flex-col overflow-hidden">
             <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
               <div className="flex justify-center">
-                <div className="bg-[#f5f2ed] px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest text-[#5A5A40]/60 border border-[#5A5A40]/10">
+                <div className="bg-parchment px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest text-leather/60 border border-leather/10">
                   Secure Imperial Channel Established
                 </div>
               </div>
@@ -238,6 +261,38 @@ export function Support({ user }: SupportProps) {
                 </Button>
               </div>
             </form>
+          </div>
+        ) : view === 'tickets' ? (
+          <div className="flex-1 p-12 flex flex-col items-center justify-center text-center space-y-8 bg-leather/5">
+             <div className="w-32 h-32 bg-white rounded-full flex items-center justify-center text-leather shadow-2xl relative border-4 border-lime/20 overflow-hidden group">
+                <img src={`https://api.dicebear.com/7.x/bottts/svg?seed=Vizier&backgroundColor=1B2E22`} alt="Vizier" className="w-full h-full p-2 group-hover:scale-110 transition-transform" />
+                <div className="absolute inset-0 bg-lime/10 animate-pulse" />
+             </div>
+             <div className="max-w-md space-y-4">
+                <h3 className="text-2xl font-serif font-bold text-leather">Consult the Vizier</h3>
+                <p className="text-leather/60 font-serif italic text-sm">"The gears of the Empire need meticulous maintenance. Describe your findings, and I shall issue a Decree of Rectification (Issue Ticket)."</p>
+             </div>
+             
+             <div className="w-full max-w-lg space-y-4">
+                <textarea 
+                  value={ticketIssue}
+                  onChange={(e) => setTicketIssue(e.target.value)}
+                  placeholder="Describe the anomaly or request..."
+                  className="w-full h-32 bg-white border border-leather/10 rounded-3xl p-6 outline-none focus:ring-2 focus:ring-lime font-serif resize-none shadow-inner"
+                />
+                <Button 
+                  onClick={handleReportBug}
+                  disabled={!ticketIssue.trim() || isGeneratingTicket}
+                  className="w-full bg-leather text-lime h-14 rounded-2xl font-bold uppercase tracking-widest shadow-xl hover:bg-black transition-all"
+                >
+                  {isGeneratingTicket ? <Sparkles className="animate-spin" /> : "Inscribe Ticket"}
+                </Button>
+             </div>
+             
+             <div className="flex gap-2 items-center bg-white/50 px-4 py-2 rounded-full border border-leather/5">
+                <Zap size={12} className="text-lime" />
+                <span className="text-[10px] font-bold uppercase tracking-widest text-leather/40">Guaranteed Response in 48 Imperial Hours</span>
+             </div>
           </div>
         ) : (
           <div className="flex-1 p-12 flex flex-col items-center justify-center text-center space-y-8">
