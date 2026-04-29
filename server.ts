@@ -87,7 +87,7 @@ const getSupabase = () => {
   return supabaseClient;
 };
 
-const genAI = new GoogleGenAI({ apiKey: process.env.VINTAGE_ORACLE_KEY || "" });
+const genAI = new GoogleGenAI({ apiKey: process.env.GOOGLE_GENAI_API_KEY || process.env.VINTAGE_ORACLE_KEY || "" });
 
 // Rate Limiting Middleware
 const rateLimits = new Map<string, { count: number, lastReset: number }>();
@@ -401,6 +401,67 @@ app.get("/api/news", async (req, res) => {
     }
   });
 
+// API: Archiving News Intel to Personal Vault
+app.post("/api/news/archive", async (req, res) => {
+  const { url, title, userId, content } = req.body;
+  if (!url || !userId) {
+    return res.status(400).json({ error: "Intelligence source and user identity required." });
+  }
+
+  try {
+    let summary = content;
+    
+    // If no content provided, scrape it
+    if (!summary) {
+      console.log(`[Archival] Fetching content for analysis: ${url}`);
+      const response = await axios.get(url, {
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+        timeout: 5000
+      });
+      const $ = cheerio.load(response.data);
+      // Basic extraction: get main paragraphs
+      const bodyText = $('p').map((_, el) => $(el).text()).get().join(' ').slice(0, 5000);
+      
+      const prompt = `
+        As a Senior Scholar at the Imperial Academy, analyze this news archive and provide a concise, UPSC-aligned summary (max 3 paragraphs).
+        Highlight GS Paper relevance and key strategic implications.
+        
+        Title: ${title}
+        Article Text: ${bodyText}
+      `;
+      
+      const aiResult = await genAI.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+      });
+      
+      summary = aiResult.text;
+    }
+
+    if (!db) throw new Error("Imperial Archives offline.");
+
+    const docRef = await db.collection("users").doc(userId).collection("notes").add({
+      title: title || "Archived Chronicle",
+      type: 'link',
+      url: url,
+      content: summary,
+      userId: userId,
+      folderId: null,
+      source: "Imperial News Desk",
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    res.json({ 
+      status: "success", 
+      id: docRef.id,
+      message: "Chronicle successfully consigned to the Vault." 
+    });
+  } catch (error: any) {
+    console.error("Archival Error:", error);
+    res.status(500).json({ error: error.message || "Failed to consign archive." });
+  }
+});
+
 // Razorpay: Create Order
 app.post("/api/create-order", rateLimiter, async (req, res) => {
   const { amount, currency = "INR" } = req.body;
@@ -408,7 +469,6 @@ app.post("/api/create-order", rateLimiter, async (req, res) => {
   const keyId = process.env.RAZORPAY_KEY_ID;
   const keySecret = process.env.RAZORPAY_KEY_SECRET;
   
-  // Robust check for valid-looking Razorpay keys
   const isValidKey = (key: string | undefined) => 
     key && 
     key.startsWith("rzp_") && 
@@ -417,10 +477,10 @@ app.post("/api/create-order", rateLimiter, async (req, res) => {
     key !== "null";
 
   if (!isValidKey(keyId) || !isValidKey(keySecret)) {
-    console.warn("Razorpay keys not configured or invalid. Returning mock order for demo purposes.");
+    console.warn("Razorpay keys not configured. Returning mock order.");
     return res.json({
       id: `order_mock_${Date.now()}`,
-      amount: amount * 100,
+      amount: (amount || 0) * 100,
       currency,
       status: "created",
       demo: true
@@ -428,58 +488,92 @@ app.post("/api/create-order", rateLimiter, async (req, res) => {
   }
 
   try {
-    // Initialize Razorpay client only when needed with validated keys
     const rzp = new Razorpay({
       key_id: keyId!,
       key_secret: keySecret!,
     });
 
     const options = {
-      amount: amount * 100, // amount in the smallest currency unit
+      amount: Math.round(amount * 100),
       currency,
-      receipt: `receipt_${Date.now()}`,
+      receipt: `imperial_receipt_${Date.now()}`,
     };
     const order = await rzp.orders.create(options);
     res.json(order);
   } catch (error: any) {
     console.error("Razorpay Order Error:", error);
-    const errorMessage = error.error?.description || "Failed to create order";
-    res.status(500).json({ error: errorMessage });
+    res.status(500).json({ error: error.error?.description || "Failed to initiate payment sequence." });
   }
 });
 
 // Razorpay: Webhook
 app.post("/api/webhook/razorpay", async (req, res) => {
-    const secret = process.env.RAZORPAY_WEBHOOK_SECRET || "mock_webhook_secret";
-    const shasum = crypto.createHmac("sha256", secret);
-    shasum.update(JSON.stringify(req.body));
-    const digest = shasum.digest("hex");
+  const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+  
+  if (!secret) {
+    console.error("[Razorpay Webhook] Missing Secret. Verification failed.");
+    return res.status(500).json({ error: "Webhook configuration missing." });
+  }
 
-    if (digest === req.headers["x-razorpay-signature"]) {
-      console.log("Razorpay Webhook Verified");
-      const event = req.body.event;
-      const payload = req.body.payload.payment.entity;
-      const userId = payload.notes?.userId;
-      const planId = payload.notes?.planId;
+  const hmac = crypto.createHmac("sha256", secret);
+  hmac.update(JSON.stringify(req.body));
+  const digest = hmac.digest("hex");
 
-      if (event === "payment.captured" && userId && db) {
-        try {
-          await db.collection("users").doc(userId).update({
-            subscriptionStatus: 'premium',
-            planId: planId,
-            lastPaymentId: payload.id,
-            updatedAt: new Date().toISOString()
-          });
-          console.log(`User ${userId} upgraded to premium via Razorpay.`);
-        } catch (error) {
-          console.error("Error updating user subscription from webhook:", error);
-        }
+  if (digest !== req.headers["x-razorpay-signature"]) {
+    console.error("[Razorpay Webhook] Signature verification mismatch.");
+    return res.status(400).json({ error: "Imperial Guard rejected invalid signature." });
+  }
+
+  const { event, payload } = req.body;
+  const entity = payload.payment.entity;
+  const userId = entity.notes?.userId;
+  const planId = entity.notes?.planId;
+
+  if (event === "payment.captured" && userId) {
+    try {
+      console.log(`[Razorpay Webhook] Processing successful payment for user: ${userId}`);
+      
+      // Update Firestore
+      if (db) {
+        await db.collection("users").doc(userId).set({
+          subscriptionStatus: 'premium',
+          planId: planId,
+          lastPaymentId: entity.id,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+        console.log(`[Firestore] User ${userId} upgraded.`);
       }
-      res.json({ status: "ok" });
-    } else {
-      res.status(400).send("Invalid signature");
+
+      // Update Supabase
+      const supabase = getSupabase();
+      if (supabase) {
+        const { error: supabaseError } = await supabase
+          .from('user_profiles') // Assuming user_profiles for consistency
+          .update({ 
+            subscription_status: 'premium',
+            plan_id: planId,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', userId);
+        
+        if (supabaseError) {
+          // Try 'users' table if 'user_profiles' fails
+          await supabase
+            .from('users')
+            .update({ subscription_status: 'premium' })
+            .eq('id', userId);
+        }
+        console.log(`[Supabase] User ${userId} upgraded.`);
+      }
+
+    } catch (error) {
+      console.error("[Webhook] Database Sync Failed:", error);
+      return res.status(500).json({ error: "Internal archival failure during upgrade." });
     }
-  });
+  }
+
+  res.json({ status: "ok" });
+});
 
 // System Update Webhook
 app.post("/api/system/update", (req, res) => {

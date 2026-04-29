@@ -70,7 +70,7 @@ export function Subscription({ user }: SubscriptionProps) {
       if (order.error) throw new Error(order.error);
 
       const options = {
-        key: process.env.VITE_RAZORPAY_KEY_ID || "rzp_test_mock",
+        key: ((import.meta as any).env.VITE_RAZORPAY_KEY_ID as string) || "rzp_test_mock",
         amount: order.amount,
         currency: order.currency,
         name: "Imperial Scholar",

@@ -14,10 +14,11 @@ import {
   Archive,
   Search,
   Filter,
-  History
+  History,
+  Check
 } from 'lucide-react';
 import { Button } from './ui/button';
-import { db, collection, onSnapshot, query, orderBy, OperationType, handleFirestoreError, doc, updateDoc } from '../lib/firebase';
+import { db, collection, onSnapshot, query, orderBy, OperationType, handleFirestoreError, doc, updateDoc, addDoc, serverTimestamp } from '../lib/firebase';
 import { supabase } from '../lib/supabase';
 import { GoogleGenAI, Type } from "@google/genai";
 import { motion, AnimatePresence } from 'motion/react';
@@ -45,6 +46,8 @@ export function NewsDesk({ user }: NewsDeskProps) {
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [savedArticles, setSavedArticles] = useState<Set<string>>(new Set());
   
   const isAdmin = user?.email === "raksha05jk.rao@gmail.com";
 
@@ -135,6 +138,35 @@ export function NewsDesk({ user }: NewsDeskProps) {
       alert("Imperial News Engine failed to initialize.");
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  const handleSaveToVault = async (item: NewsItem) => {
+    if (!user) return;
+    setSavingId(item.id);
+    try {
+      const userId = user.uid;
+      const response = await fetch('/api/news/archive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: item.url,
+          title: item.title,
+          userId: userId,
+          content: `### Imperial Summary\n\n${item.summary}\n\n**Source:** ${item.source}\n**GS Paper:** ${item.gsPaper}\n**Date:** ${item.date}`
+        })
+      });
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Archival failure");
+      
+      setSavedArticles(prev => new Set([...prev, item.id]));
+      alert("Chronicle successfully consigned to the Vault.");
+    } catch (error: any) {
+      console.error("Error saving to vault:", error);
+      alert("Failed to consign archive: " + error.message);
+    } finally {
+      setSavingId(null);
     }
   };
 
@@ -254,6 +286,24 @@ export function NewsDesk({ user }: NewsDeskProps) {
                           <Zap size={14} />
                           <span className="text-[10px] font-bold">{(item as any).relevance_score || 7}+</span>
                         </div>
+                        <button 
+                          onClick={() => handleSaveToVault(item)}
+                          disabled={savingId === item.id || savedArticles.has(item.id)}
+                          className={`p-2 rounded-xl transition-all ${
+                            savedArticles.has(item.id) 
+                              ? "bg-green-100 text-green-600" 
+                              : "hover:bg-antique-gold/10 text-saddle-brown/40 hover:text-saddle-brown"
+                          }`}
+                          title="Save to Vault"
+                        >
+                          {savingId === item.id ? (
+                            <RefreshCw size={14} className="animate-spin" />
+                          ) : savedArticles.has(item.id) ? (
+                            <Check size={14} />
+                          ) : (
+                            <Bookmark size={14} />
+                          )}
+                        </button>
                       </div>
                       <a href={item.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs font-serif font-bold text-saddle-brown hover:underline">
                         Read More <ChevronRight size={14} />
@@ -278,7 +328,29 @@ export function NewsDesk({ user }: NewsDeskProps) {
                           </div>
                           <span className="text-[10px] bg-parchment px-3 py-1 rounded-full text-leather/40 font-bold uppercase">{item.source}</span>
                         </div>
-                        <p className="text-sm font-serif text-leather/60 italic leading-relaxed">{item.summary}</p>
+                        <p className="text-sm font-serif text-leather/60 italic leading-relaxed mb-4">{item.summary}</p>
+                        <div className="flex items-center justify-between border-t border-saddle-brown/5 pt-4">
+                          <button 
+                            onClick={() => handleSaveToVault(item)}
+                            disabled={savingId === item.id || savedArticles.has(item.id)}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${
+                              savedArticles.has(item.id)
+                                ? "bg-green-50 text-green-600 border border-green-200"
+                                : "bg-antique-gold/5 text-saddle-brown hover:bg-antique-gold/20"
+                            }`}
+                          >
+                            {savingId === item.id ? (
+                              <RefreshCw size={12} className="animate-spin" />
+                            ) : savedArticles.has(item.id) ? (
+                                <>Archived <Check size={12} /></>
+                            ) : (
+                                <>Arcane Archive <Bookmark size={12} /></>
+                            )}
+                          </button>
+                          <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-xs font-bold text-saddle-brown hover:underline flex items-center gap-1">
+                            Intelligence Source <ExternalLink size={12} />
+                          </a>
+                        </div>
                       </div>
                     </div>
                   </div>
