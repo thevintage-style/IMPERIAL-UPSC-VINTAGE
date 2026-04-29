@@ -76,10 +76,10 @@ import { createClient } from "@supabase/supabase-js";
 let supabaseClient: any = null;
 const getSupabase = () => {
   if (!supabaseClient) {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!url || !key || !url.startsWith('http')) {
-      console.warn("[Supabase] Backend client not initialized: Missing credentials");
+      console.warn("[Supabase] Backend client not initialized: Missing or invalid credentials");
       return null;
     }
     supabaseClient = createClient(url, key);
@@ -367,9 +367,12 @@ app.post("/api/news/sync", async (req, res) => {
         status: "success", 
         message: `Imperial News Engine completed reconnaissance. ${processedCount} new articles summarized and archived.` 
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("News sync error:", error);
-      res.status(500).json({ error: "Failed to sync news" });
+      res.status(500).json({ 
+        error: "Failed to sync news",
+        details: error.message 
+      });
     }
   });
 
@@ -396,19 +399,19 @@ app.get("/api/news", async (req, res) => {
         }
       ];
       res.json(news);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to fetch news" });
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to fetch news", details: error.message });
     }
   });
 
 // API: Archiving News Intel to Personal Vault
 app.post("/api/news/archive", async (req, res) => {
-  const { url, title, userId, content } = req.body;
-  if (!url || !userId) {
-    return res.status(400).json({ error: "Intelligence source and user identity required." });
-  }
-
   try {
+    const { url, title, userId, content } = req.body;
+    if (!url || !userId) {
+      return res.status(400).json({ error: "Intelligence source and user identity required." });
+    }
+
     let summary = content;
     
     // If no content provided, scrape it
@@ -419,7 +422,6 @@ app.post("/api/news/archive", async (req, res) => {
         timeout: 5000
       });
       const $ = cheerio.load(response.data);
-      // Basic extraction: get main paragraphs
       const bodyText = $('p').map((_, el) => $(el).text()).get().join(' ').slice(0, 5000);
       
       const prompt = `
@@ -458,36 +460,38 @@ app.post("/api/news/archive", async (req, res) => {
     });
   } catch (error: any) {
     console.error("Archival Error:", error);
-    res.status(500).json({ error: error.message || "Failed to consign archive." });
+    res.status(500).json({ 
+      error: error.message || "Failed to consign archive.",
+      code: "ARCHIVE_FAILURE"
+    });
   }
 });
 
 // Razorpay: Create Order
 app.post("/api/create-order", rateLimiter, async (req, res) => {
-  const { amount, currency = "INR" } = req.body;
-  
-  const keyId = process.env.RAZORPAY_KEY_ID;
-  const keySecret = process.env.RAZORPAY_KEY_SECRET;
-  
-  const isValidKey = (key: string | undefined) => 
-    key && 
-    key.startsWith("rzp_") && 
-    !key.includes("MY_") && 
-    key !== "undefined" && 
-    key !== "null";
-
-  if (!isValidKey(keyId) || !isValidKey(keySecret)) {
-    console.warn("Razorpay keys not configured. Returning mock order.");
-    return res.json({
-      id: `order_mock_${Date.now()}`,
-      amount: (amount || 0) * 100,
-      currency,
-      status: "created",
-      demo: true
-    });
-  }
-
   try {
+    const { amount, currency = "INR" } = req.body;
+    
+    const keyId = process.env.RAZORPAY_KEY_ID;
+    const keySecret = process.env.RAZORPAY_KEY_SECRET;
+    
+    const isValidKey = (key: string | undefined) => 
+      key && 
+      (key.startsWith("rzp_") || (key.length > 20 && !key.includes("MY_"))) && 
+      key !== "undefined" && 
+      key !== "null";
+
+    if (!isValidKey(keyId) || !isValidKey(keySecret)) {
+      console.warn("Razorpay keys not configured. Returning mock order.");
+      return res.json({
+        id: `order_mock_${Date.now()}`,
+        amount: (amount || 0) * 100,
+        currency,
+        status: "created",
+        demo: true
+      });
+    }
+
     const rzp = new Razorpay({
       key_id: keyId!,
       key_secret: keySecret!,
@@ -502,7 +506,10 @@ app.post("/api/create-order", rateLimiter, async (req, res) => {
     res.json(order);
   } catch (error: any) {
     console.error("Razorpay Order Error:", error);
-    res.status(500).json({ error: error.error?.description || "Failed to initiate payment sequence." });
+    res.status(500).json({ 
+      error: error.error?.description || "Failed to initiate payment sequence.",
+      code: "PAYMENT_INIT_ERROR"
+    });
   }
 });
 
@@ -533,42 +540,50 @@ app.post("/api/webhook/razorpay", async (req, res) => {
     try {
       console.log(`[Razorpay Webhook] Processing successful payment for user: ${userId}`);
       
+      const updateData = {
+        subscriptionStatus: 'premium',
+        rank: 'Imperial Scholar', // Setting rank as requested
+        planId: planId,
+        lastPaymentId: entity.id,
+        updatedAt: new Date().toISOString()
+      };
+
       // Update Firestore
       if (db) {
-        await db.collection("users").doc(userId).set({
-          subscriptionStatus: 'premium',
-          planId: planId,
-          lastPaymentId: entity.id,
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
-        console.log(`[Firestore] User ${userId} upgraded.`);
+        await db.collection("users").doc(userId).set(updateData, { merge: true });
+        console.log(`[Firestore] User ${userId} upgraded to Imperial Scholar.`);
       }
 
       // Update Supabase
       const supabase = getSupabase();
       if (supabase) {
         const { error: supabaseError } = await supabase
-          .from('user_profiles') // Assuming user_profiles for consistency
+          .from('user_profiles')
           .update({ 
             subscription_status: 'premium',
+            rank: 'Imperial Scholar',
             plan_id: planId,
             updated_at: new Date().toISOString()
           })
           .eq('id', userId);
         
         if (supabaseError) {
-          // Try 'users' table if 'user_profiles' fails
+          console.warn("[Supabase] Partial failure updating user_profiles, retrying users table...");
           await supabase
             .from('users')
-            .update({ subscription_status: 'premium' })
+            .update({ 
+              subscription_status: 'premium',
+              rank: 'Imperial Scholar' 
+            })
             .eq('id', userId);
         }
-        console.log(`[Supabase] User ${userId} upgraded.`);
+        console.log(`[Supabase] User ${userId} upgraded and rank synchronized.`);
       }
 
-    } catch (error) {
+    } catch (error: any) {
       console.error("[Webhook] Database Sync Failed:", error);
-      return res.status(500).json({ error: "Internal archival failure during upgrade." });
+      // We still return 200 to Razorpay but log the error internally
+      // because we don't want Razorpay to keep retrying if it's a code-level sync issue
     }
   }
 
