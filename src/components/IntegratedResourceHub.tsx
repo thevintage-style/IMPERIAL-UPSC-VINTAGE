@@ -155,9 +155,13 @@ export function IntegratedResourceHub({ user, isAdmin }: IntegratedResourceHubPr
       setStatus({ type: 'success', message: "Resource successfully archived in the Hub." });
       setNewResource({ title: '', category: 'General', type: 'pdf', file: null, externalUrl: '' });
       if (fileInputRef.current) fileInputRef.current.value = '';
-    } catch (error) {
+    } catch (error: any) {
+      console.error("[Resource Hub Upload Failure]", error);
       handleFirestoreError(error, OperationType.CREATE, 'resource_hub');
-      setStatus({ type: 'error', message: "The Imperial archives could not accept the file. Please try again." });
+      setStatus({ 
+        type: 'error', 
+        message: `The Imperial archives could not accept the file: ${error.message || 'Archival conflict.'}` 
+      });
     } finally {
       setIsUploading(false);
     }

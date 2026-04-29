@@ -78,8 +78,14 @@ const getSupabase = () => {
   if (!supabaseClient) {
     const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (url && typeof url === 'string' && url.startsWith('AIzaSy')) {
+      console.error("[Imperial Archival Error] Backend detected a Firebase API Key in the SUPABASE_URL field. Please correct your environment variables.");
+      return null;
+    }
+
     if (!url || !key || !url.startsWith('http')) {
-      console.warn("[Supabase] Backend client not initialized: Missing or invalid credentials");
+      console.warn("[Supabase] Backend client not initialized: Missing or invalid credentials (URL must start with http).");
       return null;
     }
     supabaseClient = createClient(url, key);
@@ -473,11 +479,11 @@ app.post("/api/create-order", rateLimiter, async (req, res) => {
     const keyId = process.env.RAZORPAY_KEY_ID;
     const keySecret = process.env.RAZORPAY_KEY_SECRET;
 
-    if (!keyId || !keySecret || keyId === "undefined" || keySecret === "undefined" || keyId.includes("MY_")) {
-      console.error("[Imperial Treasury] Razorpay keys not configured or invalid in Vercel.");
+    if (!keyId || !keySecret || keyId === "undefined" || keySecret === "undefined") {
+      console.error("[Imperial Treasury] Configuration Missing: RAZORPAY_KEY_ID or SECRET is undefined.");
       return res.status(500).json({ 
         success: false, 
-        error: "Keys not configured in Vercel. Please ensure RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are set in environment variables.",
+        error: "Keys not configured in Vercel. Please ensure Imperial environment variables are set.",
         code: "CONFIG_ERROR"
       });
     }
@@ -487,29 +493,33 @@ app.post("/api/create-order", rateLimiter, async (req, res) => {
     if (!amount) {
       return res.status(400).json({ 
         success: false, 
-        error: "Tribute amount is required to initiate the commission.",
+        error: "Tribute amount is required to initiate the scholarly commission.",
         code: "INVALID_AMOUNT"
       });
     }
 
     const rzp = new Razorpay({
-      key_id: keyId!,
-      key_secret: keySecret!,
+      key_id: keyId,
+      key_secret: keySecret,
     });
 
     const options = {
-      amount: Math.round(amount * 100),
+      amount: Math.round(amount * 100), // Razorpay expects paise
       currency,
-      receipt: `imperial_receipt_${Date.now()}`,
+      receipt: `scholar_receipt_${Date.now()}`,
     };
     
     const order = await rzp.orders.create(options);
-    res.json(order);
+    if (!order) {
+      throw new Error("Razorpay failed to return an order object.");
+    }
+    
+    return res.status(200).json(order);
   } catch (error: any) {
-    console.error("Razorpay Order Error:", error);
-    res.status(500).json({ 
+    console.error("[Imperial Treasury] Payment Engine Failure:", error);
+    return res.status(500).json({ 
       success: false,
-      error: error.error?.description || error.message || "Failed to initiate payment sequence.",
+      error: error.message || "The Imperial Treasury failed to initiate the transaction.",
       code: "PAYMENT_INIT_ERROR"
     });
   }

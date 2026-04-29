@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { User as FirebaseUser } from 'firebase/auth';
 import { User as SupabaseUser } from '@supabase/supabase-js';
-import { supabase } from '../lib/supabase';
+import { supabase, isConfigured } from '../lib/supabase';
 import { 
   collection, 
   query, 
@@ -82,20 +82,32 @@ export function PersonalVault({ user }: PersonalVaultProps) {
     const file = e.target.files?.[0];
     if (!file || !userId) return;
 
+    if (!isConfigured) {
+      alert("Imperial Archives Inaccessible: Supabase is not correctly configured. Please check your environment variables.");
+      return;
+    }
+
     setIsUploading(true);
     try {
       const fileName = `${Date.now()}-${file.name}`;
       const filePath = `${userId}/${fileName}`;
       
+      console.log(`[Vault] Attempting upload of ${file.name} to branch ${filePath}`);
+      
       const { data, error } = await supabase.storage
         .from('vault')
         .upload(filePath, file);
 
-      if (error) throw error;
+      if (error) {
+        console.error('[Supabase Storage Error]', error);
+        throw new Error(error.message || "The Imperial Vault rejected the scroll.");
+      }
 
       const { data: { publicUrl } } = supabase.storage
         .from('vault')
         .getPublicUrl(filePath);
+
+      console.log("[Vault] Upload successful. Public URL generated:", publicUrl);
 
       // Save metadata to Firestore (or Supabase)
       await addDoc(collection(db, `users/${userId}/notes`), {
@@ -107,11 +119,12 @@ export function PersonalVault({ user }: PersonalVaultProps) {
         createdAt: serverTimestamp()
       });
 
-    } catch (error) {
-      console.error('Upload Error:', error);
-      alert('Failed to upload to the Imperial Vault.');
+    } catch (error: any) {
+      console.error('Upload Error Trace:', error);
+      alert(`Scholarly Upload Failed: ${error.message || 'The Imperial Archives are currently offline.'}`);
     } finally {
       setIsUploading(false);
+      if (e.target) e.target.value = ''; // Reset input
     }
   };
 

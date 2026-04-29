@@ -1,7 +1,14 @@
 import { createClient } from '@supabase/supabase-js';
 
 const getSupabaseUrl = () => {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || (import.meta as any).env.VITE_SUPABASE_URL;
+  let url = process.env.NEXT_PUBLIC_SUPABASE_URL || (import.meta as any).env.VITE_SUPABASE_URL;
+  
+  // Detection for misplaced Firebase keys
+  if (url && typeof url === 'string' && url.startsWith('AIzaSy')) {
+    console.error("[Imperial Archival Error] A Firebase API Key was detected in the Supabase URL field. Please check your Environment Variables in the Settings menu.");
+    return 'https://misconfigured.supabase.co';
+  }
+
   if (!url || typeof url !== 'string' || !url.startsWith('http')) {
     console.error("[Supabase] Invalid or missing NEXT_PUBLIC_SUPABASE_URL. Found:", url);
     return 'https://placeholder.supabase.co';
@@ -23,6 +30,7 @@ const supabaseAnonKey = getSupabaseKey();
 
 export const isConfigured = 
   supabaseUrl !== 'https://placeholder.supabase.co' && 
+  supabaseUrl !== 'https://misconfigured.supabase.co' &&
   supabaseAnonKey !== 'placeholder';
 
 if (!isConfigured) {
@@ -135,8 +143,21 @@ export const signInWithGoogle = async () => {
 };
 
 export const signOut = async () => {
-  const { error } = await supabase.auth.signOut();
-  if (error) {
-    console.error('Supabase Logout Error:', error);
+  try {
+    console.log("[Auth] Initiating Imperial Departure...");
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
+    
+    // Explicitly clear local storage to ensure fresh state for testing
+    localStorage.clear();
+    sessionStorage.clear();
+    
+    // Redirect to home/login
+    window.location.href = '/';
+  } catch (error) {
+    console.error('[Auth] Logout sequence failed:', error);
+    // Even if error, clear local and redirect
+    localStorage.clear();
+    window.location.href = '/';
   }
 };

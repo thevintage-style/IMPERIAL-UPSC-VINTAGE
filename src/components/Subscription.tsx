@@ -69,13 +69,17 @@ export function Subscription({ user }: SubscriptionProps) {
       const contentType = response.headers.get("content-type");
       if (!contentType || !contentType.includes("application/json")) {
         console.error("Non-JSON response received:", await response.text());
-        throw new Error("The Treasury server is misconfigured. Unexpected response from the Imperial Archives.");
+        alert("Treasury Connection Failed: The Imperial server is misconfigured.");
+        setSubmitting(false);
+        return;
       }
 
       const order = await response.json();
 
       if (!response.ok || order.error) {
-        throw new Error(order.error || `Imperial Protocol Exception: ${response.status}`);
+        alert("Treasury Connection Failed: " + (order.error || "Imperial Protocol Exception"));
+        setSubmitting(false);
+        return;
       }
 
       const options = {
