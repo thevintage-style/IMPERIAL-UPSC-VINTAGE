@@ -65,9 +65,18 @@ export function Subscription({ user }: SubscriptionProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ amount: plan.price })
       });
+      
+      const contentType = response.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        console.error("Non-JSON response received:", await response.text());
+        throw new Error("The Treasury server is misconfigured. Unexpected response from the Imperial Archives.");
+      }
+
       const order = await response.json();
 
-      if (order.error) throw new Error(order.error);
+      if (!response.ok || order.error) {
+        throw new Error(order.error || `Imperial Protocol Exception: ${response.status}`);
+      }
 
       const options = {
         key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "rzp_test_mock",

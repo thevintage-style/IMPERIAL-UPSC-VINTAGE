@@ -470,25 +470,25 @@ app.post("/api/news/archive", async (req, res) => {
 // Razorpay: Create Order
 app.post("/api/create-order", rateLimiter, async (req, res) => {
   try {
-    const { amount, currency = "INR" } = req.body;
-    
     const keyId = process.env.RAZORPAY_KEY_ID;
     const keySecret = process.env.RAZORPAY_KEY_SECRET;
-    
-    const isValidKey = (key: string | undefined) => 
-      key && 
-      (key.startsWith("rzp_") || (key.length > 20 && !key.includes("MY_"))) && 
-      key !== "undefined" && 
-      key !== "null";
 
-    if (!isValidKey(keyId) || !isValidKey(keySecret)) {
-      console.warn("Razorpay keys not configured. Returning mock order.");
-      return res.json({
-        id: `order_mock_${Date.now()}`,
-        amount: (amount || 0) * 100,
-        currency,
-        status: "created",
-        demo: true
+    if (!keyId || !keySecret || keyId === "undefined" || keySecret === "undefined" || keyId.includes("MY_")) {
+      console.error("[Imperial Treasury] Razorpay keys not configured or invalid in Vercel.");
+      return res.status(500).json({ 
+        success: false, 
+        error: "Keys not configured in Vercel. Please ensure RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are set in environment variables.",
+        code: "CONFIG_ERROR"
+      });
+    }
+
+    const { amount, currency = "INR" } = req.body;
+    
+    if (!amount) {
+      return res.status(400).json({ 
+        success: false, 
+        error: "Tribute amount is required to initiate the commission.",
+        code: "INVALID_AMOUNT"
       });
     }
 
@@ -502,12 +502,14 @@ app.post("/api/create-order", rateLimiter, async (req, res) => {
       currency,
       receipt: `imperial_receipt_${Date.now()}`,
     };
+    
     const order = await rzp.orders.create(options);
     res.json(order);
   } catch (error: any) {
     console.error("Razorpay Order Error:", error);
     res.status(500).json({ 
-      error: error.error?.description || "Failed to initiate payment sequence.",
+      success: false,
+      error: error.error?.description || error.message || "Failed to initiate payment sequence.",
       code: "PAYMENT_INIT_ERROR"
     });
   }
@@ -515,83 +517,87 @@ app.post("/api/create-order", rateLimiter, async (req, res) => {
 
 // Razorpay: Webhook
 app.post("/api/webhook/razorpay", async (req, res) => {
-  const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
-  
-  if (!secret) {
-    console.error("[Razorpay Webhook] Missing Secret. Verification failed.");
-    return res.status(500).json({ error: "Webhook configuration missing." });
-  }
+  try {
+    const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+    
+    if (!secret) {
+      console.error("[Razorpay Webhook] Missing Secret. Verification failed.");
+      return res.status(500).json({ success: false, error: "Webhook configuration missing." });
+    }
 
-  const hmac = crypto.createHmac("sha256", secret);
-  hmac.update(JSON.stringify(req.body));
-  const digest = hmac.digest("hex");
+    const hmac = crypto.createHmac("sha256", secret);
+    hmac.update(JSON.stringify(req.body));
+    const digest = hmac.digest("hex");
 
-  if (digest !== req.headers["x-razorpay-signature"]) {
-    console.error("[Razorpay Webhook] Signature verification mismatch.");
-    return res.status(400).json({ error: "Imperial Guard rejected invalid signature." });
-  }
+    if (digest !== req.headers["x-razorpay-signature"]) {
+      console.error("[Razorpay Webhook] Signature verification mismatch.");
+      return res.status(400).json({ success: false, error: "Imperial Guard rejected invalid signature." });
+    }
 
-  const { event, payload } = req.body;
-  const entity = payload.payment.entity;
-  const userId = entity.notes?.userId;
-  const planId = entity.notes?.planId;
+    const { event, payload } = req.body;
+    const entity = payload.payment.entity;
+    const userId = entity.notes?.userId;
+    const planId = entity.notes?.planId;
 
-  if (event === "payment.captured" && userId) {
-    try {
-      console.log(`[Razorpay Webhook] Processing successful payment for user: ${userId}`);
-      
-      const updateData = {
-        subscriptionStatus: 'premium',
-        rank: 'Imperial Scholar', // Setting rank as requested
-        planId: planId,
-        lastPaymentId: entity.id,
-        updatedAt: new Date().toISOString()
-      };
-
-      // Update Firestore
-      if (db) {
-        await db.collection("users").doc(userId).set(updateData, { merge: true });
-        console.log(`[Firestore] User ${userId} upgraded to Imperial Scholar.`);
-      }
-
-      // Update Supabase
-      const supabase = getSupabase();
-      if (supabase) {
-        const { error: supabaseError } = await supabase
-          .from('user_profiles')
-          .update({ 
-            subscription_status: 'premium',
-            rank: 'Imperial Scholar',
-            plan_id: planId,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', userId);
+    if (event === "payment.captured" && userId) {
+      try {
+        console.log(`[Razorpay Webhook] Processing successful payment for user: ${userId}`);
         
-        if (supabaseError) {
-          console.warn("[Supabase] Partial failure updating user_profiles, retrying users table...");
-          await supabase
-            .from('users')
+        const updateData = {
+          subscriptionStatus: 'premium',
+          rank: 'Imperial Scholar', // Setting rank as requested
+          planId: planId,
+          lastPaymentId: entity.id,
+          updatedAt: new Date().toISOString()
+        };
+
+        // Update Firestore
+        if (db) {
+          await db.collection("users").doc(userId).set(updateData, { merge: true });
+          console.log(`[Firestore] User ${userId} upgraded to Imperial Scholar.`);
+        }
+
+        // Update Supabase
+        const supabase = getSupabase();
+        if (supabase) {
+          const { error: supabaseError } = await supabase
+            .from('user_profiles')
             .update({ 
               subscription_status: 'premium',
-              rank: 'Imperial Scholar' 
+              rank: 'Imperial Scholar',
+              plan_id: planId,
+              updated_at: new Date().toISOString()
             })
             .eq('id', userId);
+          
+          if (supabaseError) {
+            console.warn("[Supabase] Partial failure updating user_profiles, retrying users table...");
+            await supabase
+              .from('users')
+              .update({ 
+                subscription_status: 'premium',
+                rank: 'Imperial Scholar' 
+              })
+              .eq('id', userId);
+          }
+          console.log(`[Supabase] User ${userId} upgraded and rank synchronized.`);
         }
-        console.log(`[Supabase] User ${userId} upgraded and rank synchronized.`);
+
+      } catch (error: any) {
+        console.error("[Webhook] Database Sync Failed:", error);
       }
-
-    } catch (error: any) {
-      console.error("[Webhook] Database Sync Failed:", error);
-      // We still return 200 to Razorpay but log the error internally
-      // because we don't want Razorpay to keep retrying if it's a code-level sync issue
     }
-  }
 
-  res.json({ status: "ok" });
+    res.json({ status: "ok" });
+  } catch (error: any) {
+    console.error("[Webhook] Critical failure:", error);
+    res.status(500).json({ success: false, error: "Imperial Webhook Engine failed." });
+  }
 });
 
 // System Update Webhook
 app.post("/api/system/update", (req, res) => {
+  try {
     console.log("System update triggered by Vizier.");
     // In a real app, you'd trigger a GitHub Action or Vercel Webhook here
     // axios.post(process.env.VERCEL_DEPLOY_HOOK_URL);
@@ -599,17 +605,24 @@ app.post("/api/system/update", (req, res) => {
       status: "success", 
       message: "Imperial Build Sequence initiated. Deploying v1.0.5 to the production archives." 
     });
-  });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: "System update sequence failed." });
+  }
+});
 
 // Storage Provisioning
 app.post("/api/system/provision-storage", (req, res) => {
+  try {
     console.log("Storage expansion requested.");
     // In a real app, you'd call Supabase/GCP API to increase quota
     res.json({ 
       status: "success", 
       message: "Extra 50GB provisioned in the Imperial Cloud Vault." 
     });
-  });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: "Storage provisioning failed." });
+  }
+});
 
 // Firebase Custom Token for Supabase Users
 app.post("/api/auth/firebase-token", async (req, res) => {
