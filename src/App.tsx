@@ -165,16 +165,21 @@ export default function App() {
       return;
     }
     setLoginLoading(true);
-    console.log(`Initiating Imperial ${isSignUp ? 'Registration' : 'Reconnaissance'} via Supabase...`);
+    console.log(`[Imperial Hub] Initiating ${isSignUp ? 'Registration' : 'Reconnaissance'} for ${email}...`);
     try {
       if (isSignUp) {
-        await signUpWithEmail(email, password);
-        alert("Check your email for the confirmation link!");
+        const result = await signUpWithEmail(email, password);
+        if (result?.user && !result.session) {
+          alert("Registration initiated! A sacred raven (confirmation email) has been dispatched. Please verify your identity before signing in.");
+        } else if (result?.session) {
+          alert("Welcome, Imperial Scholar! Your account is active.");
+        }
       } else {
         await signInWithEmail(email, password);
       }
     } catch (error: any) {
-      console.error("Supabase Auth Failed:", error);
+      console.error("[Imperial Auth Failed]:", error.message);
+      alert(error.message || "An arcane error occurred during identity verification.");
     } finally {
       setLoginLoading(false);
     }

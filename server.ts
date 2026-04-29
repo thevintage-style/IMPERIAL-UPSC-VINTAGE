@@ -626,35 +626,59 @@ app.post("/api/system/provision-storage", (req, res) => {
 
 // Firebase Custom Token for Supabase Users
 app.post("/api/auth/firebase-token", async (req, res) => {
-  const { uid, email, displayName } = req.body;
-  if (!uid) return res.status(400).json({ error: "UID is required" });
-
   try {
+    const { uid, email, displayName } = req.body;
+    
+    if (!uid) {
+      return res.status(400).json({ 
+        success: false, 
+        error: "UID (Imperial Identity) is required to issue a custom token.",
+        code: "IDENTITY_REQUIRED"
+      });
+    }
+
+    if (!admin.apps.length) {
+      throw new Error("Imperial Auth Engine is offline (Firebase Admin not initialized).");
+    }
+
+    console.log(`[Imperial Auth] Projecting Firebase Identity for Supabase UID: ${uid}`);
+    
     const customToken = await admin.auth().createCustomToken(uid, {
       email,
       displayName
     });
-    res.json({ token: customToken });
-  } catch (error) {
-    console.error("Error creating custom token:", error);
-    res.status(500).json({ error: "Failed to create custom token" });
+    
+    res.json({ 
+      success: true,
+      token: customToken,
+      message: "Imperial passage granted."
+    });
+  } catch (error: any) {
+    console.error("[Imperial Auth] Token Generation Failure:", error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message || "The Imperial Vault denied token issuance.",
+      code: "TOKEN_GENERATION_FAILED"
+    });
   }
 });
 
 // User Profile Proxy (Bypasses Firestore rules for Supabase users)
 app.get("/api/profile/:uid", async (req, res) => {
-  const { uid } = req.params;
-  if (!db) return res.status(500).json({ error: "Database not initialized" });
-  
   try {
+    const { uid } = req.params;
+    if (!db) {
+      return res.status(503).json({ success: false, error: "Imperial Archives offline (Database not initialized)." });
+    }
+    
     const userDoc = await db.collection("users").doc(uid).get();
     if (!userDoc.exists) {
-      return res.status(404).json({ error: "User not found" });
+      return res.status(404).json({ success: false, error: "Imperial Scroll not found for this identity." });
     }
     res.json(userDoc.data());
-  } catch (error) {
-    console.error("Error fetching profile:", error);
-    res.status(500).json({ error: "Failed to fetch profile" });
+  } catch (error: any) {
+    console.error("[Imperial Profile] Fetch Error:", error);
+    res.status(500).json({ success: false, error: error.message || "Failed to retrieve Imperial profile." });
   }
 });
 
