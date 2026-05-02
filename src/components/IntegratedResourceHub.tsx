@@ -157,10 +157,20 @@ export function IntegratedResourceHub({ user, isAdmin }: IntegratedResourceHubPr
       if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (error: any) {
       console.error("[Resource Hub Upload Failure]", error);
-      handleFirestoreError(error, OperationType.CREATE, 'resource_hub');
+      
+      let errorMsg = "The Imperial archives could not accept the file.";
+      
+      if (error.message?.includes('Failed to fetch')) {
+        errorMsg = "Treasury Network Error: Failed to connect to the Imperial Archives. Please check your connectivity or Cloud configuration.";
+      } else if (error.message?.includes('permission-denied')) {
+        errorMsg = "Imperial Archive Access Denied: You do not have the required clearance level (Admin) to modify the Hub.";
+      } else if (error.message) {
+        errorMsg = `Archival Conflict: ${error.message}`;
+      }
+      
       setStatus({ 
         type: 'error', 
-        message: `The Imperial archives could not accept the file: ${error.message || 'Archival conflict.'}` 
+        message: errorMsg
       });
     } finally {
       setIsUploading(false);

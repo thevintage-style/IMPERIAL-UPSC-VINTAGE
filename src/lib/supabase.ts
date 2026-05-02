@@ -1,32 +1,53 @@
 import { createClient } from '@supabase/supabase-js';
 
-const getSupabaseUrl = () => {
-  let url = process.env.NEXT_PUBLIC_SUPABASE_URL || (import.meta as any).env.VITE_SUPABASE_URL;
+export let configurationError: string | null = null;
+
+const getAllCredentials = () => {
+  const env = { 
+    ...(process.env || {}), 
+    ...((import.meta as any).env || {}) 
+  } as Record<string, string | undefined>;
+
+  const keys = Object.keys(env);
+  const supabaseKeys = keys.filter(k => k.includes('SUPABASE'));
   
-  // Detection for misplaced Firebase keys
-  if (url && typeof url === 'string' && url.startsWith('AIzaSy')) {
-    console.error("[Imperial Archival Error] A Firebase API Key was detected in the Supabase URL field. Please check your Environment Variables in the Settings menu.");
-    return 'https://misconfigured.supabase.co';
+  let detectedUrl: string | null = null;
+  let detectedAnonKey: string | null = null;
+  let firebaseKeyFoundInSupabaseField = false;
+
+  // First pass: Find anything that looks like a Supabase URL or Key
+  for (const k of supabaseKeys) {
+    const val = env[k];
+    if (!val || typeof val !== 'string') continue;
+
+    if (val.startsWith('http')) {
+      detectedUrl = val;
+    } else if (val.startsWith('AIzaSy')) {
+      firebaseKeyFoundInSupabaseField = true;
+    } else if (val.length > 20) {
+      // Likely the anonymous key (Supabase keys are usually long JWTs)
+      detectedAnonKey = val;
+    }
   }
 
-  if (!url || typeof url !== 'string' || !url.startsWith('http')) {
-    console.error("[Supabase] Invalid or missing NEXT_PUBLIC_SUPABASE_URL. Found:", url);
-    return 'https://placeholder.supabase.co';
+  if (firebaseKeyFoundInSupabaseField && !detectedUrl) {
+    configurationError = "A Firebase API Key (AIzaSy...) was found in a Supabase field, and no valid Supabase URL was detected. Please check your Secrets.";
+    detectedUrl = 'https://misconfigured.supabase.co';
+  } else if (!detectedUrl) {
+    configurationError = "Imperial Archives URL missing. Ensure NEXT_PUBLIC_SUPABASE_URL is set (should start with http).";
+  } else if (!detectedAnonKey) {
+    configurationError = "Imperial Archives Anonymous Key missing. Ensure NEXT_PUBLIC_SUPABASE_ANON_KEY is set.";
   }
-  return url;
+
+  return {
+    url: detectedUrl || 'https://placeholder.supabase.co',
+    key: detectedAnonKey || 'placeholder'
+  };
 };
 
-const getSupabaseKey = () => {
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || (import.meta as any).env.VITE_SUPABASE_ANON_KEY;
-  if (!key || typeof key !== 'string') {
-    console.error("[Supabase] Invalid or missing NEXT_PUBLIC_SUPABASE_ANON_KEY.");
-    return 'placeholder';
-  }
-  return key;
-};
-
-const supabaseUrl = getSupabaseUrl();
-const supabaseAnonKey = getSupabaseKey();
+const credentials = getAllCredentials();
+const supabaseUrl = credentials.url;
+const supabaseAnonKey = credentials.key;
 
 export const isConfigured = 
   supabaseUrl !== 'https://placeholder.supabase.co' && 

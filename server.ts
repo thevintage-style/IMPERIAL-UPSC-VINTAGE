@@ -14,6 +14,73 @@ import fs from "fs";
 
 process.env.NODE_ENV = process.env.NODE_ENV || 'development';
 
+/**
+ * Strict Validation: The Imperial Guard checks the archives.
+ */
+const validateEnv = () => {
+  // Common placeholders to treat as "missing"
+  const placeholders = ["your_key_here", "your_secret_here", "your_url_here", "undefined", "null", "rzp_test_mock", "placeholder", "todo", "missing"];
+  const isPlaceholder = (val?: string) => {
+    if (!val) return true;
+    const v = val.trim().replace(/^["']|["']$/g, '').toLowerCase();
+    return placeholders.includes(v) || v.includes("your_") || v.includes("<") || v.includes("[") || v.length < 6;
+  };
+
+  const getFirstValid = (...candidates: (string | undefined)[]) => {
+    for (const c of candidates) {
+      if (c && !isPlaceholder(c)) return c.trim().replace(/^["']|["']$/g, '');
+    }
+    const fallback = candidates[0]?.trim().replace(/^["']|["']$/g, '');
+    return fallback;
+  };
+
+  const razorKeyId = getFirstValid(process.env.RAZORPAY_KEY_ID, process.env.VITE_RAZORPAY_KEY_ID, process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID);
+  const razorSecret = getFirstValid(process.env.RAZORPAY_KEY_SECRET, process.env.VITE_RAZORPAY_KEY_SECRET, process.env.NEXT_PUBLIC_RAZORPAY_KEY_SECRET);
+  const supabaseUrl = getFirstValid(process.env.SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.VITE_SUPABASE_URL);
+  const supabaseServiceKey = getFirstValid(process.env.SUPABASE_SERVICE_ROLE_KEY, process.env.SUPABASE_ANON_KEY, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY, process.env.VITE_SUPABASE_ANON_KEY);
+
+  // Swap Detection: Check if keys are accidentally swapped
+  if (razorKeyId?.startsWith('https://') && supabaseUrl?.startsWith('rzp_')) {
+    return { valid: false, field: "RAZORPAY & SUPABASE", reason: "Detection: It appears your Razorpay Key ID and Supabase URL have been swapped. Please correct them in Settings (Secrets)." };
+  }
+
+  if (razorKeyId?.startsWith('https://')) {
+    return { valid: false, field: "RAZORPAY_KEY_ID", reason: "Detection: Your RAZORPAY_KEY_ID starts with 'https://'. It looks like you might have pasted a Supabase URL here." };
+  }
+
+  if (!isPlaceholder(razorKeyId) && !razorKeyId?.startsWith('rzp_')) {
+    // Check if they put the secret in the ID field (Secrets usually don't have prefixes and are long)
+    if (razorKeyId && razorKeyId.length > 20 && !razorKeyId.includes('_')) {
+       return { valid: false, field: "RAZORPAY_KEY_ID", reason: "Format Error: The Key ID provided looks like an API Secret. Key IDs must start with 'rzp_'. Did you swap them?" };
+    }
+    return { valid: false, field: "RAZORPAY_KEY_ID", reason: "The Key ID format is invalid. It must start with 'rzp_'. Please verify your Razorpay credentials." };
+  }
+
+  if (!isPlaceholder(supabaseUrl) && (!supabaseUrl?.startsWith('https://') || !supabaseUrl?.includes('.supabase.co'))) {
+    return { valid: false, field: "SUPABASE_URL", reason: "The Supabase URL format is invalid. It must start with 'https://' and include '.supabase.co'." };
+  }
+
+  if (supabaseUrl?.includes('firebase') || supabaseUrl?.includes('AIzaSy') || razorKeyId?.startsWith('AIzaSy')) {
+    return { valid: false, field: "MIXUP_DETECTED", reason: "A Firebase API key was detected in a Supabase or Razorpay field. Please ensure you haven't swapped your keys." };
+  }
+
+  return { 
+    valid: true, 
+    keys: { 
+      razorKeyId: isPlaceholder(razorKeyId) ? undefined : razorKeyId,
+      razorSecret: isPlaceholder(razorSecret) ? undefined : razorSecret,
+      supabaseUrl: isPlaceholder(supabaseUrl) ? undefined : supabaseUrl,
+      supabaseServiceKey: isPlaceholder(supabaseServiceKey) ? undefined : supabaseServiceKey
+    } 
+  };
+};
+
+// Safety Shield: Root-level variable validation
+const envCheck = validateEnv();
+if (!envCheck.valid) {
+  console.error(`CRITICAL CONFIG ERROR: ${envCheck.reason} in ${envCheck.field}`);
+}
+
 // Load Firebase Config
 let firebaseAppletConfig: any = null;
 try {
@@ -76,19 +143,12 @@ import { createClient } from "@supabase/supabase-js";
 let supabaseClient: any = null;
 const getSupabase = () => {
   if (!supabaseClient) {
-    const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (url && typeof url === 'string' && url.startsWith('AIzaSy')) {
-      console.error("[Imperial Archival Error] Backend detected a Firebase API Key in the SUPABASE_URL field. Please correct your environment variables.");
+    const envStatus = validateEnv();
+    if (!envStatus.valid || !envStatus.keys.supabaseUrl || !envStatus.keys.supabaseServiceKey) {
+      console.warn("[Supabase] Backend client not initialized: Missing or invalid credentials.");
       return null;
     }
-
-    if (!url || !key || !url.startsWith('http')) {
-      console.warn("[Supabase] Backend client not initialized: Missing or invalid credentials (URL must start with http).");
-      return null;
-    }
-    supabaseClient = createClient(url, key);
+    supabaseClient = createClient(envStatus.keys.supabaseUrl, envStatus.keys.supabaseServiceKey);
   }
   return supabaseClient;
 };
@@ -474,16 +534,33 @@ app.post("/api/news/archive", async (req, res) => {
 });
 
 // Razorpay: Create Order
-app.post("/api/create-order", rateLimiter, async (req, res) => {
-  try {
-    const keyId = process.env.RAZORPAY_KEY_ID;
-    const keySecret = process.env.RAZORPAY_KEY_SECRET;
+app.post("/api/razorpay", rateLimiter, async (req, res) => {
+  // Requirement: Explicitly set JSON header first
+  res.setHeader('Content-Type', 'application/json');
 
-    if (!keyId || !keySecret || keyId === "undefined" || keySecret === "undefined") {
-      console.error("[Imperial Treasury] Configuration Missing: RAZORPAY_KEY_ID or SECRET is undefined.");
+  try {
+    const envStatus = validateEnv();
+    
+    // Safety Shield Check
+    if (!envStatus.valid) {
+      console.error("[Imperial Treasury] Shield Active: Invalid Format Detected", envStatus);
       return res.status(500).json({ 
-        success: false, 
-        error: "Keys not configured in Vercel. Please ensure Imperial environment variables are set.",
+        status: "shield_active", 
+        reason: "Invalid Variable Format", 
+        field: envStatus.field,
+        detail: envStatus.reason
+      });
+    }
+
+    const { razorKeyId: keyId, razorSecret: keySecret } = envStatus.keys;
+
+    // Credential Debugger: Log partial key for verification without exposure
+    console.log('[Imperial Treasury] Using Key ID:', keyId?.substring(0, 8) + '...');
+
+    if (!keyId || !keySecret || keyId === "undefined" || keySecret === "undefined" || keyId === "rzp_test_mock") {
+      console.error("[Imperial Treasury] Configuration Missing: RAZORPAY_KEY_ID or SECRET is undefined or mock.");
+      return res.status(500).json({ 
+        error: "The Imperial Treasury is not configured. Please ensure specialized environment variables (RAZORPAY_KEY_ID & RAZORPAY_KEY_SECRET) are set in the Settings menu (Secrets).",
         code: "CONFIG_ERROR"
       });
     }
@@ -492,16 +569,25 @@ app.post("/api/create-order", rateLimiter, async (req, res) => {
     
     if (!amount) {
       return res.status(400).json({ 
-        success: false, 
         error: "Tribute amount is required to initiate the scholarly commission.",
         code: "INVALID_AMOUNT"
       });
     }
 
-    const rzp = new Razorpay({
-      key_id: keyId,
-      key_secret: keySecret,
-    });
+    // Authentication Fix: Handle BAD_REQUEST_ERROR explicitly
+    let rzp;
+    try {
+      rzp = new Razorpay({
+        key_id: keyId,
+        key_secret: keySecret,
+      });
+    } catch (initErr: any) {
+      console.error("[Imperial Treasury] Initialization Failed:", initErr);
+      return res.status(401).json({ 
+        error: "Invalid Razorpay Keys. Check Vercel Environment Variables.",
+        code: "AUTH_FAILURE"
+      });
+    }
 
     const options = {
       amount: Math.round(amount * 100), // Razorpay expects paise
@@ -509,20 +595,65 @@ app.post("/api/create-order", rateLimiter, async (req, res) => {
       receipt: `scholar_receipt_${Date.now()}`,
     };
     
-    const order = await rzp.orders.create(options);
-    if (!order) {
-      throw new Error("Razorpay failed to return an order object.");
+    try {
+      const order = await rzp.orders.create(options);
+      if (!order) {
+        throw new Error("Razorpay failed to return an order object.");
+      }
+      return res.status(200).json({ ...order, key: keyId });
+    } catch (orderErr: any) {
+      // Check for Authentication failed in ordering process
+      const errStr = JSON.stringify(orderErr).toLowerCase();
+      if (errStr.includes("authentication failed") || orderErr.statusCode === 401) {
+        return res.status(401).json({ 
+          error: "Invalid Razorpay Keys. Check Vercel Environment Variables.",
+          code: "AUTH_FAILURE"
+        });
+      }
+      throw orderErr;
     }
-    
-    return res.status(200).json(order);
   } catch (error: any) {
     console.error("[Imperial Treasury] Payment Engine Failure:", error);
-    return res.status(500).json({ 
-      success: false,
-      error: error.message || "The Imperial Treasury failed to initiate the transaction.",
-      code: "PAYMENT_INIT_ERROR"
+    
+    let status = error.statusCode || 500;
+    let errorMessage = "The Imperial Treasury failed to initiate the transaction.";
+    let code = error.code || "PAYMENT_INIT_ERROR";
+    let description = error.description || error.message || "";
+
+    if (error.error && typeof error.error === 'object') {
+      description = error.error.description || description;
+      code = error.error.code || code;
+    }
+
+    const rawErrorStr = (description + " " + code).toLowerCase();
+    
+    // Error Catching: specific requirement for Authentication failures
+    if (rawErrorStr.includes("authentication failed") || code === "BAD_REQUEST_ERROR" || status === 401) {
+      return res.status(401).json({ 
+        error: "Invalid Razorpay Keys. Check Vercel Environment Variables.",
+        code: "AUTH_FAILURE"
+      });
+    }
+
+    if (rawErrorStr.includes("malformed") || code === "MALFORMED_KEY") {
+      errorMessage = "Malformed Key: Your Razorpay Key ID should usually start with 'rzp_'.";
+      code = "CONFIG_ERROR";
+    } else if (description) {
+      errorMessage = description;
+    }
+
+    return res.status(status).json({ 
+      error: errorMessage,
+      code: code,
+      description: description || errorMessage
     });
   }
+});
+
+// Alias for backwards compatibility
+app.post("/api/create-order", (req, res) => {
+  // @ts-ignore
+  return app._router.handle(req, res, () => {});
 });
 
 // Razorpay: Webhook
@@ -769,6 +900,39 @@ app.delete("/api/user-data/:uid/:collection/:id", async (req, res) => {
   } catch (error) {
     console.error(`Error deleting ${collection}:`, error);
     res.status(500).json({ error: `Failed to delete ${collection}` });
+  }
+});
+
+// API: Community Trending Summary
+app.post("/api/community/summarize", rateLimiter, async (req, res) => {
+  try {
+    const { messages } = req.body;
+    if (!messages || !Array.isArray(messages)) {
+      return res.status(400).json({ error: "No messages to summarize." });
+    }
+
+    const textToSummarize = messages.map(m => m.text || "").join("\n");
+    if (!textToSummarize) return res.status(400).json({ error: "No text to summarize." });
+
+    const prompt = `
+      As a Senior Academic Coordinator at the Imperial UPSC Academy, analyze these recent community discussions and provide:
+      1. A high-level summary of the trending topics (3 bullet points).
+      2. Strategic advice for students based on these discussions.
+      3. A list of key terms (max 5) mentioned that are UPSC relevant.
+      
+      Discussions:
+      ${textToSummarize}
+    `;
+
+    const aiResult = await genAI.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+    });
+
+    res.json({ summary: aiResult.text });
+  } catch (error: any) {
+    console.error("Community Summary Error:", error);
+    res.status(500).json({ error: "Failed to generate community summary." });
   }
 });
 

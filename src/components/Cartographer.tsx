@@ -110,6 +110,27 @@ const STRATEGIC_POINTS = [
     info: "Mineral-rich region in eastern India. Heart of India's mineral wealth.",
     upsc: "GS-I: Distribution of Key Natural Resources; Iron & Steel Industry location factors.",
     type: "plateau"
+  },
+  {
+    name: "Western Ghats (Sahyadris)",
+    coords: [14.0, 74.0],
+    info: "Mountain range along the western coast. Global biodiversity hotspot.",
+    upsc: "GS-I: Physical Geography; GS-III: Environment; Kasturirangan & Madhav Gadgil Reports.",
+    type: "strategic"
+  },
+  {
+    name: "Narmada River",
+    coords: [21.7, 72.8],
+    info: "Fifth largest river and largest west flowing river. Flows in a rift valley.",
+    upsc: "GS-I: Drainage Systems; Sardar Sarovar Dam (Multipurpose project); Narmada Bachao Andolan.",
+    type: "river"
+  },
+  {
+    name: "Sundarbans Delta",
+    coords: [21.9, 88.8],
+    info: "World's largest mangrove forest. UNESCO World Heritage site.",
+    upsc: "GS-I: Biogeography; GS-III: Climate Change; Royal Bengal Tigers habitat.",
+    type: "river"
   }
 ];
 
@@ -194,7 +215,8 @@ export function Cartographer({ user }: CartographerProps) {
     const targetLon = lon ?? center[1];
     
     // Guest Mode / Mock Data Fallback if API key is missing
-    if (!process.env.VINTAGE_ORACLE_KEY) {
+    const apiKey = process.env.VINTAGE_ORACLE_KEY || process.env.GEMINI_API_KEY;
+    if (!apiKey) {
       setTimeout(() => {
         setAnalysis(`
 ### Strategic Intelligence (Guest Mode)
@@ -204,7 +226,7 @@ export function Cartographer({ user }: CartographerProps) {
 **Strategic Importance:** Positioned as a key node for regional connectivity and security.
 **UPSC Relevance:** GS Paper I (Physical Geography) and GS Paper III (Internal Security).
 
-*Note: Connect your Imperial Oracle Key for deep-dive AI analysis.*
+*Note: Connect your Oracle Key for deep-dive AI analysis.*
         `.trim());
         setIsAnalyzing(false);
       }, 1000);
@@ -212,7 +234,7 @@ export function Cartographer({ user }: CartographerProps) {
     }
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.VINTAGE_ORACLE_KEY });
+      const ai = new GoogleGenAI({ apiKey });
       
       const prompt = detailed 
         ? `As a Senior UPSC Scholar and Strategic Analyst, provide an EXHAUSTIVE deep-dive analysis for the location at [${targetLat}, ${targetLon}] ${name ? `named ${name}` : ''}.

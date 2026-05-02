@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { auth, onSnapshot, doc, db, googleProvider, signInWithPopup, signOut as firebaseSignOut, getDoc, setDoc, OperationType, handleFirestoreError } from './lib/firebase';
-import { supabase, signInWithEmail, signUpWithEmail, isConfigured as isSupabaseConfigured } from './lib/supabase';
+import { supabase, signInWithEmail, signUpWithEmail, isConfigured as isSupabaseConfigured, configurationError } from './lib/supabase';
 import { User as FirebaseUser } from 'firebase/auth';
 import { User as SupabaseUser } from '@supabase/supabase-js';
 import { Layout } from './components/Layout';
@@ -196,7 +196,14 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#f5f2ed] flex items-center justify-center">
+      <div className="min-h-screen bg-[#f5f2ed] flex items-center justify-center relative">
+        {configurationError && (
+          <div className="fixed top-0 left-0 right-0 z-[10000] bg-red-600 text-white px-6 py-4 shadow-2xl flex items-center justify-center gap-3">
+             <span className="font-bold whitespace-nowrap">⚠️ Archive Error:</span>
+             <p className="text-sm font-medium">{configurationError}</p>
+             <button onClick={() => window.location.reload()} className="bg-white/20 hover:bg-white/40 px-3 py-1 rounded-lg text-xs font-bold transition-colors">Test Connection</button>
+          </div>
+        )}
         <div className="text-center">
           <BookOpen className="w-12 h-12 text-[#5A5A40] animate-pulse mx-auto mb-4" />
           <p className="font-serif italic text-[#5A5A40]">Opening the Imperial Archives...</p>
@@ -207,7 +214,14 @@ export default function App() {
 
   if (!user && !otpStep) {
     return (
-      <div className="min-h-screen bg-[#f5f2ed] flex items-center justify-center p-4">
+      <div className="min-h-screen bg-[#f5f2ed] flex items-center justify-center p-4 relative">
+        {configurationError && (
+          <div className="fixed top-0 left-0 right-0 z-[10000] bg-red-600 text-white px-6 py-4 shadow-2xl flex items-center justify-center gap-3">
+             <span className="font-bold whitespace-nowrap">⚠️ Archive Error:</span>
+             <p className="text-sm font-medium">{configurationError}</p>
+             <button onClick={() => window.location.reload()} className="bg-white/20 hover:bg-white/40 px-3 py-1 rounded-lg text-xs font-bold transition-colors">Test Connection</button>
+          </div>
+        )}
         <div className="max-w-md w-full bg-white p-8 rounded-3xl shadow-xl border border-[#5A5A40]/10 text-center">
           <div className="w-20 h-20 bg-[#5A5A40] rounded-full flex items-center justify-center mx-auto mb-6 shadow-lg">
             <BookOpen className="w-10 h-10 text-white" />

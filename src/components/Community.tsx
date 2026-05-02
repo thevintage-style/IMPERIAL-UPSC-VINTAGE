@@ -24,12 +24,14 @@ import {
   ShieldAlert,
   MessageSquare,
   Sparkles,
-  AlertTriangle
+  AlertTriangle,
+  RefreshCw
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
 import { ReportModal } from './ReportModal';
+import ReactMarkdown from 'react-markdown';
 
 interface Comment {
   id: string;
@@ -103,6 +105,26 @@ export function Community({ user, isAdmin }: CommunityProps) {
   const [view, setView] = useState<'chat' | 'square' | 'dashboard'>('chat');
   const [activeChannel, setActiveChannel] = useState<'general' | 'highlights'>('general');
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const [trendingSummary, setTrendingSummary] = useState<string | null>(null);
+  const [isSummarizing, setIsSummarizing] = useState(false);
+
+  const fetchTrendingSummary = async () => {
+    setIsSummarizing(true);
+    try {
+      const response = await fetch('/api/community/summarize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: messages.slice(-50) })
+      });
+      const data = await response.json();
+      setTrendingSummary(data.summary);
+    } catch (error) {
+      console.error("Summary Error:", error);
+    } finally {
+      setIsSummarizing(false);
+    }
+  };
 
   const adminChatId = "ADMIN_HUB";
 
@@ -322,6 +344,33 @@ export function Community({ user, isAdmin }: CommunityProps) {
               <p className="text-2xl font-serif font-bold text-leather">{messages.filter(m => m.isPinned).length}</p>
               <p className="text-[10px] uppercase tracking-widest text-saddle-brown/40">Pinned Decrees</p>
             </div>
+          </div>
+
+          <div className="bg-white p-8 rounded-[40px] border border-saddle-brown/10 shadow-lg mb-8">
+            <div className="flex items-center justify-between mb-6">
+              <h4 className="font-serif font-bold text-xl text-leather flex items-center gap-2">
+                <Sparkles size={20} className="text-antique-gold" />
+                Imperial AI: News Summary & Trending Insights
+              </h4>
+              <button 
+                onClick={fetchTrendingSummary}
+                disabled={isSummarizing}
+                className="px-4 py-2 bg-antique-gold text-leather rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-antique-gold/80 transition-all flex items-center gap-2"
+              >
+                {isSummarizing ? <RefreshCw size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                Generate Intelligence Report
+              </button>
+            </div>
+            
+            {trendingSummary ? (
+              <div className="prose prose-sepia prose-sm max-w-none bg-parchment/30 p-6 rounded-3xl border border-saddle-brown/5">
+                <ReactMarkdown>{trendingSummary}</ReactMarkdown>
+              </div>
+            ) : (
+              <p className="text-sm font-serif italic text-leather/50 text-center py-6 border-2 border-dashed border-leather/10 rounded-3xl">
+                No intelligence report generated yet. Click above to analyze current discussions.
+              </p>
+            )}
           </div>
 
           <div className="bg-white p-8 rounded-[40px] border border-saddle-brown/10 shadow-lg">

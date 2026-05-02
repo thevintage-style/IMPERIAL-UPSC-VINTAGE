@@ -23,7 +23,7 @@ export function OwnerSettings({ user }: OwnerSettingsProps) {
   
   // Plans State
   const [plans, setPlans] = useState<any[]>([]);
-  const [newPlan, setNewPlan] = useState({ name: '', duration: '', price: 0, features: [''], isActive: true, highlight: false });
+  const [newPlan, setNewPlan] = useState({ name: '', duration: '', price: 0, paymentLink: '', features: [''], isActive: true, highlight: false });
   
   // Resources State
   const [resources, setResources] = useState<any[]>([]);
@@ -283,11 +283,12 @@ export function OwnerSettings({ user }: OwnerSettingsProps) {
     try {
       const planData = {
         ...newPlan,
-        features: newPlan.features.filter(f => f.trim() !== '')
+        features: newPlan.features.filter(f => f.trim() !== ''),
+        createdAt: serverTimestamp()
       };
       await addDoc(collection(db, 'plans'), planData);
       await logAction('PLAN_CREATED', `New subscription plan created: ${newPlan.name}`);
-      setNewPlan({ name: '', duration: '', price: 0, features: [''], isActive: true, highlight: false });
+      setNewPlan({ name: '', duration: '', price: 0, paymentLink: '', features: [''], isActive: true, highlight: false });
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'plans');
     }
@@ -774,6 +775,12 @@ export function OwnerSettings({ user }: OwnerSettingsProps) {
                     value={newPlan.price}
                     onChange={(e) => setNewPlan({...newPlan, price: Number(e.target.value)})}
                     className="bg-[#f5f2ed] border border-[#5A5A40]/10 rounded-xl py-3 px-4 font-serif outline-none"
+                  />
+                  <input 
+                    placeholder="Payment Link (Instamojo/Razorpay)"
+                    value={newPlan.paymentLink}
+                    onChange={(e) => setNewPlan({...newPlan, paymentLink: e.target.value})}
+                    className="bg-[#f5f2ed] border border-[#5A5A40]/10 rounded-xl py-3 px-4 font-serif outline-none col-span-1 lg:col-span-3 mt-2"
                   />
                 </div>
                 <div className="space-y-4 mb-8">

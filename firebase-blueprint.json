@@ -116,8 +116,10 @@
         "duration": { "type": "string" },
         "price": { "type": "number" },
         "features": { "type": "array", "items": { "type": "string" } },
+        "paymentLink": { "type": "string", "description": "Payment link for Instamojo/Razorpay" },
         "isActive": { "type": "boolean" },
-        "highlight": { "type": "boolean" }
+        "highlight": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["name", "duration", "price"]
     },
@@ -279,6 +281,9 @@
           "type": "object",
           "additionalProperties": { "type": "array", "items": { "type": "string" } }
         },
+        "isPinned": { "type": "boolean" },
+        "isHighlighted": { "type": "boolean" },
+        "channel": { "type": "string", "enum": ["general", "highlights"] },
         "replyCount": { "type": "number" },
         "createdAt": { "type": "string", "format": "date-time" }
       },

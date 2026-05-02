@@ -60,30 +60,83 @@ export function Subscription({ user }: SubscriptionProps) {
   const handleRazorpayPayment = async (plan: any) => {
     setSubmitting(true);
     try {
-      const response = await fetch('/api/create-order', {
+      // Diagnostic: Initiating treasury fetch
+      console.log(`[Imperial Hub] Requesting order for plan: ${plan.name} (${plan.price} INR)`);
+      
+      const response = await fetch('/api/razorpay', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ amount: plan.price })
       });
       
       const contentType = response.headers.get("content-type");
-      if (!contentType || !contentType.includes("application/json")) {
-        console.error("Non-JSON response received:", await response.text());
-        alert("Treasury Connection Failed: The Imperial server is misconfigured.");
+      const isJson = contentType && contentType.includes("application/json");
+
+      if (!isJson) {
+        const text = await response.text();
+        console.error("Non-JSON response received from Treasury:", text);
+        alert("Treasury Connection Failed: The Imperial server returned an invalid response. Please verify your internet connection or server status.");
         setSubmitting(false);
         return;
       }
 
       const order = await response.json();
+      
+      // Diagnostic: Log backend response
+      console.log('[Treasury] Ledger Response:', order);
 
-      if (!response.ok || order.error) {
-        alert("Treasury Connection Failed: " + (order.error || "Imperial Protocol Exception"));
+      // Handle External Payment Link if provided in plan
+      if (plan.paymentLink) {
+        window.open(plan.paymentLink, '_blank');
         setSubmitting(false);
         return;
       }
 
+      if (!response.ok || order.error || order.status === 'shield_active') {
+        // High-priority: Authentication/Configuration/Mixup/Shield failures
+        if (order.status === 'shield_active') {
+          console.error("[Imperial Treasury] Shield Active Triggered:", order);
+          alert(`📜 Treasury Alert: The Imperial Archives require a configuration update. Please check the Vercel Dashboard.\n\nReason: ${order.reason} (${order.field})`);
+          setSubmitting(false);
+          return;
+        }
+
+        if (order.error === 'Environment Variable Mixup') {
+          console.error("[Imperial Treasury] Safety Shield Triggered: Mixup detected.");
+          alert("📜 Treasury Alert: Environment Variable Mixup Detected!\n\nCheck your Settings (Secrets) for swapped keys. A Firebase key might be in a Supabase or Razorpay field.");
+          setSubmitting(false);
+          return;
+        }
+
+        if (order.code === 'AUTH_FAILURE') {
+          console.error("[Imperial Treasury] Authentication failure detected:", order);
+          alert("Key Authentication Failed: Your Razorpay API Key ID or Secret is invalid. Please verify them in the Settings menu (Secrets).");
+          setSubmitting(false);
+          return;
+        }
+
+        if (order.code === 'CONFIG_ERROR' || order.code === 'MALFORMED_KEY') {
+          console.error("[Imperial Treasury] Configuration Dispute:", order);
+          alert(`📜 Treasury Proclamation:\n${order.error}`);
+          setSubmitting(false);
+          return;
+        }
+
+        const errorDetail = order.error || order.description || "Imperial Protocol Exception";
+        console.error("[Imperial Treasury] Transactional Friction:", order);
+        alert("Treasury Connection Failed: " + errorDetail);
+        setSubmitting(false);
+        return;
+      }
+
+      if (!order.id) {
+        throw new Error("The Treasury failed to issue a valid Order ID.");
+      }
+
+      const razorpayKey = order.key || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "rzp_test_mock";
+
       const options = {
-        key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "rzp_test_mock",
+        key: razorpayKey,
         amount: order.amount,
         currency: order.currency,
         name: "Imperial Scholar",

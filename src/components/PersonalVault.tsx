@@ -13,6 +13,7 @@ import {
   deleteDoc, 
   doc, 
   serverTimestamp,
+  getDocs
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { 
@@ -204,18 +205,48 @@ export function PersonalVault({ user }: PersonalVaultProps) {
     }
   };
 
+  const [movingItem, setMovingItem] = useState<VaultItem | null>(null);
+
   const handleDeleteItem = async (id: string, type: 'item' | 'folder') => {
     if (!userId) return;
     try {
       if (type === 'item') {
         await deleteDoc(doc(db, `users/${userId}/notes`, id));
       } else {
-        // Recursive delete would be better, but for now just the folder
-        await deleteDoc(doc(db, `users/${userId}/folders`, id));
+        // Recursive delete: find all subfolders and items
+        const deleteFolderRecursive = async (folderId: string) => {
+          // Delete items in this folder
+          const itemDocs = await getDocs(query(collection(db, `users/${userId}/notes`), where('folderId', '==', folderId)));
+          for (const d of itemDocs.docs) {
+            await deleteDoc(d.ref);
+          }
+          
+          // Delete subfolders
+          const subfolders = folders.filter(f => f.parentId === folderId);
+          for (const sub of subfolders) {
+            await deleteFolderRecursive(sub.id);
+          }
+          
+          // Delete the folder itself
+          await deleteDoc(doc(db, `users/${userId}/folders`, folderId));
+        };
+        await deleteFolderRecursive(id);
       }
       setConfirmDelete(null);
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `users/${userId}/${type === 'item' ? 'notes' : 'folders'}`);
+    }
+  };
+
+  const handleMoveToFolder = async (itemId: string, targetFolderId: string | null) => {
+    if (!userId) return;
+    try {
+      await updateDoc(doc(db, `users/${userId}/notes`, itemId), {
+        folderId: targetFolderId
+      });
+      setMovingItem(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${userId}/notes`);
     }
   };
 
@@ -443,6 +474,13 @@ export function PersonalVault({ user }: PersonalVaultProps) {
                     )}
                   </div>
                   <div className="absolute top-4 right-4 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); setMovingItem(item); }}
+                      className="p-2 hover:bg-[#F5F2E7] rounded-full text-[#8B4513]/40 hover:text-[#8B4513]"
+                      title="Move to Folder"
+                    >
+                      <ArrowRight size={14} />
+                    </button>
                     {(item.type === 'note' || item.type === 'map_marker') && <button onClick={() => setEditingNote(item)} className="p-2 hover:bg-[#F5F2E7] rounded-full text-[#8B4513]/40 hover:text-[#8B4513]"><Edit3 size={14} /></button>}
                     <button onClick={() => setConfirmDelete({id: item.id, type: 'item'})} className="p-2 hover:bg-red-50 rounded-full text-red-400 hover:text-red-600"><Trash2 size={14} /></button>
                   </div>
@@ -489,6 +527,40 @@ export function PersonalVault({ user }: PersonalVaultProps) {
               <div className="flex gap-3 mt-10">
                 <Button onClick={() => setIsAddingItem(false)} variant="ghost" className="flex-1">Cancel</Button>
                 <Button onClick={handleAddItem} className="flex-1 bg-[#8B4513] text-white">Add to Vault</Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Note Editor Modal */}
+      <AnimatePresence>
+        {movingItem && (
+          <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-[#F5F2E7] p-8 rounded-[32px] border-4 border-[#8B4513] shadow-2xl max-w-sm w-full">
+              <h3 className="text-xl font-serif font-bold text-[#8B4513] mb-6">Relocate Archive</h3>
+              <p className="text-sm font-serif italic text-leather/60 mb-6">Select candidate for the new repository of "{movingItem.title}"</p>
+              <div className="space-y-2 mb-6 max-h-60 overflow-y-auto custom-scrollbar">
+                <button 
+                  onClick={() => handleMoveToFolder(movingItem.id, null)}
+                  className={`w-full flex items-center gap-3 p-3 rounded-xl border border-[#8B4513]/10 hover:bg-white transition-all text-left ${movingItem.folderId === null ? 'bg-white border-[#D4AF37]' : ''}`}
+                >
+                  <FolderIcon size={16} className="text-[#D4AF37]" />
+                  <span className="text-sm font-serif">Root Vault</span>
+                </button>
+                {folders.map(f => (
+                  <button 
+                    key={f.id}
+                    onClick={() => handleMoveToFolder(movingItem.id, f.id)}
+                    className={`w-full flex items-center gap-3 p-3 rounded-xl border border-[#8B4513]/10 hover:bg-white transition-all text-left ${movingItem.folderId === f.id ? 'bg-white border-[#D4AF37]' : ''}`}
+                  >
+                    <FolderIcon size={16} className="text-[#D4AF37]" />
+                    <span className="text-sm font-serif">{f.name}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-3">
+                <Button onClick={() => setMovingItem(null)} variant="ghost" className="flex-1">Cancel</Button>
               </div>
             </motion.div>
           </div>

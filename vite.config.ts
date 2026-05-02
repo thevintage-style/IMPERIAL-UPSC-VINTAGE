@@ -14,6 +14,15 @@ export default defineConfig(({mode}) => {
       'process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID': JSON.stringify(env.NEXT_PUBLIC_RAZORPAY_KEY_ID),
     },
     envPrefix: ['VITE_', 'NEXT_PUBLIC_'],
+    build: {
+      outDir: 'dist',
+      emptyOutDir: true,
+      rollupOptions: {
+        input: {
+          main: path.resolve(__dirname, 'index.html'),
+        },
+      },
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

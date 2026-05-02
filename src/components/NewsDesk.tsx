@@ -15,7 +15,8 @@ import {
   Search,
   Filter,
   History,
-  Check
+  Check,
+  Volume2
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { db, collection, onSnapshot, query, orderBy, OperationType, handleFirestoreError, doc, updateDoc, addDoc, serverTimestamp } from '../lib/firebase';
@@ -170,6 +171,33 @@ export function NewsDesk({ user }: NewsDeskProps) {
     }
   };
 
+  const [listeningId, setListeningId] = useState<string | null>(null);
+
+  const handleListen = async (item: NewsItem) => {
+    setListeningId(item.id);
+    try {
+      const response = await fetch('/api/tts/elevenlabs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: item.summary })
+      });
+      
+      if (!response.ok) throw new Error('Voice synthesis failed');
+      
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.play();
+    } catch (error) {
+      console.error('TTS Error:', error);
+      alert('The Imperial Voice Engine is currently offline. Using default scholarly narration.');
+      const utterance = new SpeechSynthesisUtterance(item.summary);
+      window.speechSynthesis.speak(utterance);
+    } finally {
+      setListeningId(null);
+    }
+  };
+
   const CalendarHeader = () => {
     const dates = [];
     for (let i = 0; i < 7; i++) {
@@ -302,6 +330,18 @@ export function NewsDesk({ user }: NewsDeskProps) {
                             <Check size={14} />
                           ) : (
                             <Bookmark size={14} />
+                          )}
+                        </button>
+                        <button 
+                          onClick={() => handleListen(item)}
+                          disabled={listeningId === item.id}
+                          className="p-2 hover:bg-antique-gold/10 text-saddle-brown/40 hover:text-saddle-brown rounded-xl transition-all"
+                          title="Listen to Summary"
+                        >
+                          {listeningId === item.id ? (
+                            <RefreshCw size={14} className="animate-spin" />
+                          ) : (
+                            <Volume2 size={14} />
                           )}
                         </button>
                       </div>
