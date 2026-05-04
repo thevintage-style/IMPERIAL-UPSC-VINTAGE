@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User } from 'firebase/auth';
+import { User as SupabaseUser } from '@supabase/supabase-js';
 import { 
   Newspaper, 
   ExternalLink, 
@@ -16,16 +16,16 @@ import {
   Filter,
   History,
   Check,
-  Volume2
+  Volume2,
+  X
 } from 'lucide-react';
 import { Button } from './ui/button';
-import { db, collection, onSnapshot, query, orderBy, OperationType, handleFirestoreError, doc, updateDoc, addDoc, serverTimestamp } from '../lib/firebase';
 import { supabase } from '../lib/supabase';
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import { motion, AnimatePresence } from 'motion/react';
 
 interface NewsDeskProps {
-  user: User;
+  user: SupabaseUser;
 }
 
 interface NewsItem {
@@ -45,9 +45,13 @@ export function NewsDesk({ user }: NewsDeskProps) {
   const [news, setNews] = useState<NewsItem[]>([]);
   const [archiveNews, setArchiveNews] = useState<NewsItem[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [selectedSource, setSelectedSource] = useState<string>('all');
+  const [selectedGS, setSelectedGS] = useState<string>('all');
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [analyzingId, setAnalyzingId] = useState<string | null>(null);
+  const [articleAnalysis, setArticleAnalysis] = useState<Record<string, any>>({});
   const [savedArticles, setSavedArticles] = useState<Set<string>>(new Set());
   
   const isAdmin = user?.email === "raksha05jk.rao@gmail.com";
@@ -58,20 +62,28 @@ export function NewsDesk({ user }: NewsDeskProps) {
     } else {
       fetchArchive(selectedDate);
     }
-  }, [activeTab, selectedDate]);
+  }, [activeTab, selectedDate, selectedSource, selectedGS]);
 
   const fetchDailyNews = async () => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('daily_news')
-        .select('*')
-        .order('relevance_score', { ascending: false });
+        .select('*');
+      
+      if (selectedSource !== 'all') {
+        query = query.eq('source', selectedSource);
+      }
+      if (selectedGS !== 'all') {
+        query = query.eq('upsc_category', selectedGS);
+      }
+
+      const { data, error } = await query.order('relevance_score', { ascending: false });
 
       if (error) throw error;
       
-      if (!data || data.length === 0) {
-        // Fallback: Fetch archives from previous day
+      if ((!data || data.length === 0) && selectedSource === 'all' && selectedGS === 'all') {
+        // Fallback: Fetch archives from previous day only if no filters applied and today is empty
         const yesterday = new Date();
         yesterday.setDate(yesterday.getDate() - 1);
         const yesterdayStr = yesterday.toISOString().split('T')[0];
@@ -108,11 +120,19 @@ export function NewsDesk({ user }: NewsDeskProps) {
   const fetchArchive = async (date: string) => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('news_archives')
         .select('*')
-        .eq('date_published', date)
-        .order('relevance_score', { ascending: false });
+        .eq('date_published', date);
+
+      if (selectedSource !== 'all') {
+        query = query.eq('source', selectedSource);
+      }
+      if (selectedGS !== 'all') {
+        query = query.eq('upsc_category', selectedGS);
+      }
+
+      const { data, error } = await query.order('relevance_score', { ascending: false });
 
       if (error) throw error;
       setArchiveNews(data?.map(d => ({
@@ -124,6 +144,30 @@ export function NewsDesk({ user }: NewsDeskProps) {
       console.error("Archive Fetch Error:", error);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleAnalyze = async (item: NewsItem) => {
+    if (analyzingId === item.id) return;
+    setAnalyzingId(item.id);
+    try {
+      const response = await fetch('/api/news/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: item.url,
+          title: item.title,
+          summary: item.summary
+        })
+      });
+
+      if (!response.ok) throw new Error("The Oracle is currently busy.");
+      const analysis = await response.json();
+      setArticleAnalysis(prev => ({ ...prev, [item.id]: analysis }));
+    } catch (error: any) {
+      alert(error.message);
+    } finally {
+      setAnalyzingId(null);
     }
   };
 
@@ -146,7 +190,7 @@ export function NewsDesk({ user }: NewsDeskProps) {
     if (!user) return;
     setSavingId(item.id);
     try {
-      const userId = user.uid;
+      const userId = user.id;
       const response = await fetch('/api/news/archive', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -268,35 +312,76 @@ export function NewsDesk({ user }: NewsDeskProps) {
         </div>
       </div>
 
+      {/* Filter Bar */}
+      <div className="flex flex-wrap gap-4 items-center bg-[#F5F2E7] p-4 rounded-3xl border border-saddle-brown/10">
+        <div className="flex items-center gap-2">
+          <Filter size={14} className="text-saddle-brown/40" />
+          <span className="text-[10px] font-bold uppercase tracking-widest text-saddle-brown/60">Filters:</span>
+        </div>
+        
+        <select 
+          value={selectedSource} 
+          onChange={(e) => setSelectedSource(e.target.value)}
+          className="bg-white border border-saddle-brown/10 rounded-xl px-4 py-2 text-xs font-serif outline-none focus:border-antique-gold transition-all"
+        >
+          <option value="all">All Sources</option>
+          <option value="The Hindu">The Hindu</option>
+          <option value="Indian Express">Indian Express</option>
+          <option value="PIB">PIB</option>
+          <option value="Insights on India">Insights on India</option>
+          <option value="PMF IAS">PMF IAS</option>
+        </select>
+
+        <select 
+          value={selectedGS} 
+          onChange={(e) => setSelectedGS(e.target.value)}
+          className="bg-white border border-saddle-brown/10 rounded-xl px-4 py-2 text-xs font-serif outline-none focus:border-antique-gold transition-all"
+        >
+          <option value="all">All GS Papers</option>
+          <option value="GS I">GS I: History & Geography</option>
+          <option value="GS II">GS II: Polity & Governance</option>
+          <option value="GS III">GS III: Economy & Environment</option>
+          <option value="GS IV">GS IV: Ethics</option>
+        </select>
+
+        {(selectedSource !== 'all' || selectedGS !== 'all') && (
+          <button 
+            onClick={() => { setSelectedSource('all'); setSelectedGS('all'); }}
+            className="text-[10px] font-bold text-saddle-brown/40 hover:text-red-500 flex items-center gap-1 transition-all"
+          >
+            Clear Filters <X size={10} />
+          </button>
+        )}
+      </div>
+
       {activeTab === 'archive' && <CalendarHeader />}
 
       {/* Main Content Area */}
       <div className="relative">
         <AnimatePresence mode="wait">
           <motion.div
-            key={activeTab + selectedDate}
+            key={activeTab + selectedDate + selectedSource + selectedGS}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
             transition={{ duration: 0.3 }}
-            className={`grid grid-cols-1 ${activeTab === 'archive' ? 'gap-4' : 'md:grid-cols-2 lg:grid-cols-3 gap-8'}`}
+            className={`grid grid-cols-1 ${activeTab === 'archive' ? 'gap-4' : 'md:grid-cols-2 lg:grid-cols-2 gap-8'}`}
           >
             {isLoading ? (
-              Array(3).fill(0).map((_, i) => (
+              Array(2).fill(0).map((_, i) => (
                 <div key={i} className="bg-white/50 h-64 rounded-[40px] border border-saddle-brown/10 animate-pulse" />
               ))
             ) : (
               (activeTab === 'daily' ? news : archiveNews).map((item, idx) => (
-                activeTab === 'daily' ? (
-                  /* Daily Card View */
-                  <div key={item.id} className="bg-white p-8 rounded-[40px] border border-saddle-brown/10 shadow-lg hover:shadow-2xl transition-all duration-500 group relative overflow-hidden">
-                    <div className="absolute top-0 right-0 bg-antique-gold/10 text-saddle-brown/40 text-[8px] font-bold uppercase tracking-widest px-4 py-2 rounded-bl-2xl">
-                      {item.source}
-                    </div>
-                    
-                    <div className="flex items-center gap-2 mb-4">
+                <div key={item.id} className="bg-white p-8 rounded-[40px] border border-saddle-brown/10 shadow-lg hover:shadow-2xl transition-all duration-500 group relative flex flex-col">
+                  {/* Analysis Modal Overlay or Inline? Let's do inline expansion-like feel */}
+                  <div className="flex-1">
+                    <div className="flex justify-between items-start mb-4">
                       <span className="px-3 py-1 bg-leather text-parchment text-[10px] font-bold rounded-full uppercase tracking-widest">
                         {item.gsPaper}
+                      </span>
+                      <span className="text-[10px] font-bold text-saddle-brown/40 uppercase tracking-widest px-4 py-1 bg-[#F5F2E7] rounded-full border border-saddle-brown/5">
+                        {item.source}
                       </span>
                     </div>
 
@@ -304,97 +389,90 @@ export function NewsDesk({ user }: NewsDeskProps) {
                       {item.title}
                     </h4>
 
-                    <p className="text-sm font-serif text-leather/70 line-clamp-3 mb-6 italic leading-relaxed">
-                      {item.summary}
-                    </p>
-
-                    <div className="flex items-center justify-between pt-6 border-t border-saddle-brown/5">
-                      <div className="flex items-center gap-4">
-                        <div className="flex items-center gap-1 text-antique-gold">
-                          <Zap size={14} />
-                          <span className="text-[10px] font-bold">{(item as any).relevance_score || 7}+</span>
+                    {!articleAnalysis[item.id] ? (
+                      <p className="text-sm font-serif text-leather/70 mb-6 italic leading-relaxed">
+                        {item.summary}
+                      </p>
+                    ) : (
+                      <div className="space-y-6 mb-6">
+                        <div className="bg-antique-gold/5 p-4 rounded-2xl border border-antique-gold/10">
+                          <h6 className="text-[10px] font-bold text-antique-gold uppercase tracking-widest mb-2 flex items-center gap-2">
+                            <Sparkles size={12} /> Strategic Summary
+                          </h6>
+                          <p className="text-xs font-serif text-leather/80 leading-relaxed italic">{articleAnalysis[item.id].summary}</p>
                         </div>
-                        <button 
-                          onClick={() => handleSaveToVault(item)}
-                          disabled={savingId === item.id || savedArticles.has(item.id)}
-                          className={`p-2 rounded-xl transition-all ${
-                            savedArticles.has(item.id) 
-                              ? "bg-green-100 text-green-600" 
-                              : "hover:bg-antique-gold/10 text-saddle-brown/40 hover:text-saddle-brown"
-                          }`}
-                          title="Save to Vault"
-                        >
-                          {savingId === item.id ? (
-                            <RefreshCw size={14} className="animate-spin" />
-                          ) : savedArticles.has(item.id) ? (
-                            <Check size={14} />
-                          ) : (
-                            <Bookmark size={14} />
-                          )}
-                        </button>
-                        <button 
-                          onClick={() => handleListen(item)}
-                          disabled={listeningId === item.id}
-                          className="p-2 hover:bg-antique-gold/10 text-saddle-brown/40 hover:text-saddle-brown rounded-xl transition-all"
-                          title="Listen to Summary"
-                        >
-                          {listeningId === item.id ? (
-                            <RefreshCw size={14} className="animate-spin" />
-                          ) : (
-                            <Volume2 size={14} />
-                          )}
-                        </button>
-                      </div>
-                      <a href={item.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs font-serif font-bold text-saddle-brown hover:underline">
-                        Read More <ChevronRight size={14} />
-                      </a>
-                    </div>
-                  </div>
-                ) : (
-                  /* Timeline View for Archive */
-                  <div key={item.id} className="flex gap-6 group">
-                    <div className="flex flex-col items-center">
-                      <div className="w-12 h-12 rounded-full bg-antique-gold/20 flex items-center justify-center border-2 border-antique-gold/50 text-leather">
-                        <Archive size={20} />
-                      </div>
-                      <div className="w-[2px] flex-1 bg-antique-gold/20 my-2" />
-                    </div>
-                    <div className="flex-1 pb-10">
-                      <div className="bg-white p-6 rounded-3xl border border-saddle-brown/10 shadow-md group-hover:shadow-lg transition-all group-hover:-translate-y-1">
-                        <div className="flex justify-between items-start mb-3">
-                          <div>
-                            <span className="text-[10px] font-bold text-antique-gold uppercase tracking-[0.2em]">{item.gsPaper}</span>
-                            <h5 className="font-serif font-bold text-lg text-saddle-brown mt-1">{item.title}</h5>
+                        
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100/50">
+                            <h6 className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-3 flex items-center gap-2">
+                              <Zap size={12} /> Prelims Facts
+                            </h6>
+                            <ul className="space-y-2">
+                              {articleAnalysis[item.id].prelims_facts?.map((f: string, i: number) => (
+                                <li key={i} className="text-[10px] font-serif text-blue-900/70 border-l-2 border-blue-200 pl-2">{f}</li>
+                              ))}
+                            </ul>
                           </div>
-                          <span className="text-[10px] bg-parchment px-3 py-1 rounded-full text-leather/40 font-bold uppercase">{item.source}</span>
-                        </div>
-                        <p className="text-sm font-serif text-leather/60 italic leading-relaxed mb-4">{item.summary}</p>
-                        <div className="flex items-center justify-between border-t border-saddle-brown/5 pt-4">
-                          <button 
-                            onClick={() => handleSaveToVault(item)}
-                            disabled={savingId === item.id || savedArticles.has(item.id)}
-                            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${
-                              savedArticles.has(item.id)
-                                ? "bg-green-50 text-green-600 border border-green-200"
-                                : "bg-antique-gold/5 text-saddle-brown hover:bg-antique-gold/20"
-                            }`}
-                          >
-                            {savingId === item.id ? (
-                              <RefreshCw size={12} className="animate-spin" />
-                            ) : savedArticles.has(item.id) ? (
-                                <>Archived <Check size={12} /></>
-                            ) : (
-                                <>Arcane Archive <Bookmark size={12} /></>
-                            )}
-                          </button>
-                          <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-xs font-bold text-saddle-brown hover:underline flex items-center gap-1">
-                            Intelligence Source <ExternalLink size={12} />
-                          </a>
+                          <div className="bg-saddle-brown/5 p-4 rounded-2xl border border-saddle-brown/10">
+                            <h6 className="text-[10px] font-bold text-saddle-brown uppercase tracking-widest mb-3 flex items-center gap-2">
+                              <BookOpen size={12} /> Mains Dimensions
+                            </h6>
+                            <ul className="space-y-2">
+                              {articleAnalysis[item.id].mains_dimensions?.map((d: string, i: number) => (
+                                <li key={i} className="text-[10px] font-serif text-saddle-brown/70 border-l-2 border-saddle-brown/20 pl-2">{d}</li>
+                              ))}
+                            </ul>
+                          </div>
                         </div>
                       </div>
-                    </div>
+                    )}
                   </div>
-                )
+
+                  <div className="flex items-center justify-between pt-6 border-t border-saddle-brown/5">
+                    <div className="flex items-center gap-3">
+                      <button 
+                        onClick={() => handleAnalyze(item)}
+                        disabled={analyzingId === item.id || articleAnalysis[item.id]}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${
+                          articleAnalysis[item.id]
+                            ? "bg-antique-gold text-leather shadow-sm"
+                            : "bg-saddle-brown/5 text-saddle-brown hover:bg-saddle-brown/10"
+                        }`}
+                      >
+                        {analyzingId === item.id ? (
+                          <RefreshCw size={12} className="animate-spin" />
+                        ) : articleAnalysis[item.id] ? (
+                          <><Check size={12} /> Analysis Complete</>
+                        ) : (
+                          <><Sparkles size={12} /> Deep Analysis</>
+                        )}
+                      </button>
+                      
+                      <button 
+                        onClick={() => handleSaveToVault(item)}
+                        disabled={savingId === item.id || savedArticles.has(item.id)}
+                        className={`p-2 rounded-xl transition-all ${
+                          savedArticles.has(item.id) 
+                            ? "bg-green-100 text-green-600 shadow-inner" 
+                            : "hover:bg-antique-gold/10 text-saddle-brown/40 hover:text-saddle-brown"
+                        }`}
+                        title="Archival Storage"
+                      >
+                        {savingId === item.id ? (
+                          <RefreshCw size={14} className="animate-spin" />
+                        ) : savedArticles.has(item.id) ? (
+                          <Check size={14} />
+                        ) : (
+                          <Bookmark size={14} />
+                        )}
+                      </button>
+                    </div>
+                    
+                    <a href={item.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest p-2 text-saddle-brown/40 hover:text-saddle-brown transition-colors">
+                      Source <ExternalLink size={12} />
+                    </a>
+                  </div>
+                </div>
               ))
             )}
           </motion.div>

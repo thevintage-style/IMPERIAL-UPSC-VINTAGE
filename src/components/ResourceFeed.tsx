@@ -1,18 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { User } from 'firebase/auth';
-import { 
-  collection, 
-  query, 
-  orderBy, 
-  onSnapshot, 
-  addDoc, 
-  serverTimestamp, 
-  doc, 
-  updateDoc, 
-  deleteDoc,
-  increment
-} from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { User as SupabaseUser } from '@supabase/supabase-js';
+import { supabase } from '../lib/supabase';
 import { 
   Heart, 
   MessageCircle, 
@@ -32,17 +20,17 @@ interface ResourcePost {
   id: string;
   title: string;
   content: string;
-  authorId: string;
-  authorName: string;
+  author_id: string;
+  author_name: string;
   type: 'article' | 'pdf' | 'video';
   likes: number;
-  commentCount: number;
+  comment_count: number;
   link?: string;
-  createdAt: any;
+  created_at: string;
 }
 
 interface ResourceFeedProps {
-  user: User;
+  user: SupabaseUser;
   isAdmin: boolean;
 }
 
@@ -51,27 +39,43 @@ export function ResourceFeed({ user, isAdmin }: ResourceFeedProps) {
   const [showAddModal, setShowAddModal] = useState(false);
   const [newPost, setNewPost] = useState({ title: '', content: '', type: 'article' as const, link: '' });
 
+  const fetchPosts = async () => {
+    const { data, error } = await supabase
+      .from('resource_posts')
+      .select('*')
+      .order('created_at', { ascending: false });
+    
+    if (error) {
+      console.error("Resource Feed Fetch Error:", error);
+    } else {
+      setPosts(data || []);
+    }
+  };
+
   useEffect(() => {
-    if (!user || !db) return;
-    const q = query(collection(db, 'resourcePosts'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setPosts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ResourcePost)));
-    }, (error) => {
-      console.error("Resource Feed Listener Error:", error);
-    });
-    return () => unsubscribe();
+    if (!user) return;
+    fetchPosts();
+
+    const channel = supabase
+      .channel('resource_posts_changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'resource_posts' }, fetchPosts)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [user]);
 
   const handleAddPost = async () => {
     if (!newPost.title || !newPost.content) return;
     try {
-      await addDoc(collection(db, 'resourcePosts'), {
+      await supabase.from('resource_posts').insert({
         ...newPost,
-        authorId: user.uid,
-        authorName: user.displayName || 'Imperial Admin',
+        author_id: user.id,
+        author_name: user.user_metadata?.full_name || 'Imperial Admin',
         likes: 0,
-        commentCount: 0,
-        createdAt: serverTimestamp()
+        comment_count: 0,
+        created_at: new Date().toISOString()
       });
       setShowAddModal(false);
       setNewPost({ title: '', content: '', type: 'article', link: '' });
@@ -80,11 +84,11 @@ export function ResourceFeed({ user, isAdmin }: ResourceFeedProps) {
     }
   };
 
-  const handleLike = async (postId: string) => {
+  const handleLike = async (postId: string, currentLikes: number) => {
     try {
-      await updateDoc(doc(db, 'resourcePosts', postId), {
-        likes: increment(1)
-      });
+      await supabase.from('resource_posts')
+        .update({ likes: currentLikes + 1 })
+        .eq('id', postId);
     } catch (error) {
       console.error("Error liking post:", error);
     }
@@ -94,7 +98,7 @@ export function ResourceFeed({ user, isAdmin }: ResourceFeedProps) {
     if (!isAdmin) return;
     if (confirm("Are you sure you want to remove this resource from the Imperial Archives?")) {
       try {
-        await deleteDoc(doc(db, 'resourcePosts', postId));
+        await supabase.from('resource_posts').delete().eq('id', postId);
       } catch (error) {
         console.error("Error deleting post:", error);
       }
@@ -141,10 +145,10 @@ export function ResourceFeed({ user, isAdmin }: ResourceFeedProps) {
                       <h3 className="text-xl font-serif font-bold text-leather">{post.title}</h3>
                       <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-saddle-brown/40 font-bold">
                         <UserIcon size={10} />
-                        {post.authorName}
+                        {post.author_name}
                         <span className="mx-1">•</span>
                         <Clock size={10} />
-                        {post.createdAt?.toDate().toLocaleDateString() || 'Recently'}
+                        {new Date(post.created_at).toLocaleDateString()}
                       </div>
                     </div>
                   </div>
@@ -173,7 +177,7 @@ export function ResourceFeed({ user, isAdmin }: ResourceFeedProps) {
                 <div className="flex items-center justify-between pt-6 border-t border-saddle-brown/5">
                   <div className="flex gap-6">
                     <button 
-                      onClick={() => handleLike(post.id)}
+                      onClick={() => handleLike(post.id, post.likes)}
                       className="flex items-center gap-2 text-saddle-brown/60 hover:text-red-500 transition-colors group"
                     >
                       <Heart size={18} className="group-hover:fill-current" />
@@ -181,7 +185,7 @@ export function ResourceFeed({ user, isAdmin }: ResourceFeedProps) {
                     </button>
                     <button className="flex items-center gap-2 text-saddle-brown/60 hover:text-saddle-brown transition-colors">
                       <MessageCircle size={18} />
-                      <span className="text-xs font-bold">{post.commentCount}</span>
+                      <span className="text-xs font-bold">{post.comment_count}</span>
                     </button>
                   </div>
                   <button className="text-saddle-brown/60 hover:text-saddle-brown transition-colors">

@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Book, ChevronLeft, ChevronRight, CheckCircle2, Circle, Lock, Sparkles, Loader2 } from 'lucide-react';
 import { Button } from './ui/button';
-import { db, collection, doc, getDoc, setDoc, onSnapshot } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
+import { User as SupabaseUser } from '@supabase/supabase-js';
 
 interface SyllabusTopic {
   id: string;
@@ -103,28 +104,46 @@ const SYLLABUS_DATA: Record<string, SyllabusPage[]> = {
   ]
 };
 
-export function Syllabus({ user }: { user: any }) {
+export function Syllabus({ user }: { user: SupabaseUser }) {
   const [activePaper, setActivePaper] = useState('GS Paper I');
   const [currentPage, setCurrentPage] = useState(0);
   const [direction, setDirection] = useState(0);
   const [completedTopics, setCompletedTopics] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
 
-  const userId = user?.uid || user?.id;
+  const userId = user?.id;
 
   useEffect(() => {
     if (!userId) return;
 
-    const progressRef = doc(db, 'syllabusProgress', userId);
-    const unsubscribe = onSnapshot(progressRef, (doc) => {
-      if (doc.exists()) {
-        const data = doc.data();
-        setCompletedTopics(new Set(data.completed || []));
+    const fetchProgress = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('syllabus_progress')
+          .select('*')
+          .eq('user_id', userId)
+          .single();
+        
+        if (data) {
+          setCompletedTopics(new Set(data.completed || []));
+        }
+      } catch (error) {
+        console.error("Error fetching syllabus progress:", error);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
-    });
+    };
 
-    return () => unsubscribe();
+    fetchProgress();
+
+    const subscription = supabase
+      .channel('syllabus_changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'syllabus_progress', filter: `user_id=eq.${userId}` }, fetchProgress)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(subscription);
+    };
   }, [userId]);
 
   const toggleTopic = async (topicId: string) => {
@@ -140,10 +159,15 @@ export function Syllabus({ user }: { user: any }) {
     setCompletedTopics(newCompleted);
 
     try {
-      await setDoc(doc(db, 'syllabusProgress', userId), {
-        completed: Array.from(newCompleted),
-        updatedAt: new Date().toISOString()
-      }, { merge: true });
+      const { error } = await supabase
+        .from('syllabus_progress')
+        .upsert({
+          user_id: userId,
+          completed: Array.from(newCompleted),
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id' });
+      
+      if (error) throw error;
     } catch (error) {
       console.error("Error updating syllabus progress:", error);
     }

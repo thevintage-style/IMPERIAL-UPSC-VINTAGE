@@ -1,16 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User } from 'firebase/auth';
-import { 
-  collection, 
-  query, 
-  where, 
-  onSnapshot, 
-  addDoc as addFirestoreDoc, 
-  serverTimestamp, 
-  doc, 
-  updateDoc, 
-} from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { User as SupabaseUser } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { 
   UserPlus, 
@@ -35,11 +24,11 @@ import { motion, AnimatePresence } from 'motion/react';
 import { ReportModal } from './ReportModal';
 
 interface ChatUser {
-  uid: string;
-  displayName: string;
+  id: string;
+  display_name: string;
   email: string;
   role: string;
-  photoURL?: string;
+  photo_url?: string;
 }
 
 interface PeerMessage {
@@ -53,7 +42,7 @@ interface PeerMessage {
 }
 
 interface PeerChatProps {
-  user: User;
+  user: SupabaseUser;
 }
 
 export function PeerChat({ user }: PeerChatProps) {
@@ -69,52 +58,71 @@ export function PeerChat({ user }: PeerChatProps) {
   const [attachmentUrl, setAttachmentUrl] = useState('');
 
   useEffect(() => {
+    if (!user?.id) return;
+
     // Fetch blocked users
-    if (!user?.uid || !db) return;
+    const fetchBlocked = async () => {
+      const { data } = await supabase
+        .from('blocked_users')
+        .select('blocked_id')
+        .eq('blocker_id', user.id);
+      
+      if (data) setBlockedUserIds(data.map(b => b.blocked_id));
+    };
 
-    const qBlocked = query(
-      collection(db, 'blockedUsers'),
-      where('blockerId', '==', user.uid)
-    );
-    const unsubscribeBlocked = onSnapshot(qBlocked, (snapshot) => {
-      setBlockedUserIds(snapshot.docs.map(doc => doc.data().blockedId));
-    }, (error) => {
-      console.warn("PeerChat Blocked Users Listener Error:", error);
-    });
-
-    // Fetch all users
-    const unsubscribeUsers = onSnapshot(collection(db, 'publicProfiles'), (snapshot) => {
-      const allUsers = snapshot.docs
-        .map(doc => ({ uid: doc.id, ...doc.data() } as ChatUser))
-        .filter(u => u.uid !== user.uid)
-        .sort((a, b) => {
-          // Logic: Pin 'Admin' (ID: admin_01) to the top
-          if (a.uid === 'admin_01' || a.role === 'admin') return -1;
-          if (b.uid === 'admin_01' || b.role === 'admin') return 1;
-          return (a.displayName || '').localeCompare(b.displayName || '');
-        });
-      setUsers(allUsers);
-    }, (error) => {
-      console.warn("PeerChat Public Profiles Listener Error:", error);
-    });
+    // Fetch all users from public_profiles
+    const fetchUsers = async () => {
+      const { data } = await supabase
+        .from('public_profiles')
+        .select('*');
+      
+      if (data) {
+        const allUsers = data
+          .filter(u => u.id !== user.id)
+          .sort((a, b) => {
+            if (a.id === 'admin_01' || a.role === 'admin') return -1;
+            if (b.id === 'admin_01' || b.role === 'admin') return 1;
+            return (a.display_name || '').localeCompare(b.display_name || '');
+          });
+        setUsers(allUsers);
+      }
+    };
 
     // Fetch chat requests
-    const qRequests = query(
-      collection(db, 'chatRequests'),
-      where('toId', '==', user.uid)
-    );
-    const unsubscribeRequests = onSnapshot(qRequests, (snapshot) => {
-      setRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => {
-      console.warn("PeerChat Chat Requests Listener Error:", error);
-    });
+    const fetchRequests = async () => {
+      const { data } = await supabase
+        .from('chat_requests')
+        .select('*')
+        .eq('to_id', user.id);
+      
+      if (data) setRequests(data);
+    };
+
+    fetchBlocked();
+    fetchUsers();
+    fetchRequests();
+
+    // Subscribe to requests
+    const requestsChannel = supabase
+      .channel('chat-requests')
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'chat_requests',
+        filter: `to_id=eq.${user.id}`
+      }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          setRequests(prev => [...prev, payload.new]);
+        } else if (payload.eventType === 'UPDATE') {
+          setRequests(prev => prev.map(r => r.id === payload.new.id ? payload.new : r));
+        }
+      })
+      .subscribe();
 
     return () => {
-      unsubscribeBlocked();
-      unsubscribeUsers();
-      unsubscribeRequests();
+      supabase.removeChannel(requestsChannel);
     };
-  }, [user.uid]);
+  }, [user.id]);
 
   // Supabase Realtime Messages
   useEffect(() => {
@@ -124,7 +132,7 @@ export function PeerChat({ user }: PeerChatProps) {
       const { data, error } = await supabase
         .from('peer_messages')
         .select('*')
-        .or(`and(sender_id.eq.${user.uid},receiver_id.eq.${selectedUser.uid}),and(sender_id.eq.${selectedUser.uid},receiver_id.eq.${user.uid})`)
+        .or(`and(sender_id.eq.${user.id},receiver_id.eq.${selectedUser.id}),and(sender_id.eq.${selectedUser.id},receiver_id.eq.${user.id})`)
         .order('created_at', { ascending: true })
         .limit(100);
 
@@ -137,7 +145,7 @@ export function PeerChat({ user }: PeerChatProps) {
 
     // Subscribe to changes
     const channel = supabase
-      .channel('peer-chat-room')
+      .channel(`chat:${selectedUser.id}`)
       .on('postgres_changes', { 
         event: 'INSERT', 
         schema: 'public', 
@@ -145,8 +153,8 @@ export function PeerChat({ user }: PeerChatProps) {
       }, (payload) => {
         const newMsg = payload.new as PeerMessage;
         if (
-          (newMsg.sender_id === user.uid && newMsg.receiver_id === selectedUser.uid) ||
-          (newMsg.sender_id === selectedUser.uid && newMsg.receiver_id === user.uid)
+          (newMsg.sender_id === user.id && newMsg.receiver_id === selectedUser.id) ||
+          (newMsg.sender_id === selectedUser.id && newMsg.receiver_id === user.id)
         ) {
           setMessages(prev => [...prev, newMsg]);
         }
@@ -156,16 +164,16 @@ export function PeerChat({ user }: PeerChatProps) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [selectedUser, user.uid]);
+  }, [selectedUser, user.id]);
 
   const sendRequest = async (targetId: string) => {
     try {
-      await addFirestoreDoc(collection(db, 'chatRequests'), {
-        fromId: user.uid,
-        fromName: user.displayName || user.email,
-        toId: targetId,
+      await supabase.from('chat_requests').insert({
+        from_id: user.id,
+        from_name: user.user_metadata?.full_name || user.email,
+        to_id: targetId,
         status: 'pending',
-        createdAt: serverTimestamp()
+        created_at: new Date().toISOString()
       });
       alert("Scholarly request dispatched. Wait for their acceptance.");
     } catch (error) {
@@ -175,7 +183,10 @@ export function PeerChat({ user }: PeerChatProps) {
 
   const handleRequest = async (requestId: string, status: 'accepted' | 'rejected') => {
     try {
-      await updateDoc(doc(db, 'chatRequests', requestId), { status });
+      await supabase
+        .from('chat_requests')
+        .update({ status })
+        .eq('id', requestId);
     } catch (error) {
       console.error("Error handling request:", error);
     }
@@ -187,8 +198,8 @@ export function PeerChat({ user }: PeerChatProps) {
     try {
       const { error } = await supabase.from('peer_messages').insert({
         text: inputText,
-        sender_id: user.uid,
-        receiver_id: selectedUser.uid,
+        sender_id: user.id,
+        receiver_id: selectedUser.id,
         attachment_type: attachmentType,
         attachment_url: attachmentUrl,
         created_at: new Date().toISOString()
@@ -207,12 +218,12 @@ export function PeerChat({ user }: PeerChatProps) {
 
   const handleBlockUser = async () => {
     if (!selectedUser) return;
-    if (confirm(`Are you sure you wish to banish ${selectedUser.displayName} from your scholarly circle?`)) {
+    if (confirm(`Are you sure you wish to banish ${selectedUser.display_name} from your scholarly circle?`)) {
       try {
-        await addFirestoreDoc(collection(db, 'blockedUsers'), {
-          blockerId: user.uid,
-          blockedId: selectedUser.uid,
-          createdAt: serverTimestamp()
+        await supabase.from('blocked_users').insert({
+          blocker_id: user.id,
+          blocked_id: selectedUser.id,
+          created_at: new Date().toISOString()
         });
         setSelectedUser(null);
         alert("The scholar has been banished from your view.");
@@ -223,8 +234,8 @@ export function PeerChat({ user }: PeerChatProps) {
   };
 
   const filteredUsers = users.filter(u => 
-    !blockedUserIds.includes(u.uid) &&
-    (u.displayName || '').toLowerCase().includes(searchQuery.toLowerCase())
+    !blockedUserIds.includes(u.id) &&
+    (u.display_name || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
@@ -258,13 +269,13 @@ export function PeerChat({ user }: PeerChatProps) {
               <div className="space-y-2">
                 {requests.filter(r => r.status === 'pending').map(req => (
                   <div key={req.id} className="bg-white p-3 rounded-xl border border-saddle-brown/10 flex items-center justify-between shadow-sm">
-                    <span className="text-xs font-serif font-bold truncate">{req.fromName}</span>
+                    <span className="text-xs font-serif font-bold truncate">{req.from_name}</span>
                     <div className="flex gap-1">
                       <button onClick={() => handleRequest(req.id, 'accepted')} className="p-1.5 bg-green-50 text-green-600 rounded-lg hover:bg-green-100 transition-colors">
                         <Check size={14} />
                       </button>
                       <button onClick={() => handleRequest(req.id, 'rejected')} className="p-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors">
-                        <X size={14} />
+                         <X size={14} />
                       </button>
                     </div>
                   </div>
@@ -277,32 +288,32 @@ export function PeerChat({ user }: PeerChatProps) {
           <div className="p-2 space-y-1">
             {filteredUsers.map(u => (
               <button
-                key={u.uid}
+                key={u.id}
                 onClick={() => setSelectedUser(u)}
                 className={`w-full flex items-center gap-3 p-3 rounded-2xl transition-all ${
-                  selectedUser?.uid === u.uid 
+                  selectedUser?.id === u.id 
                     ? 'bg-saddle-brown text-parchment shadow-lg scale-[0.98]' 
                     : 'hover:bg-saddle-brown/5 text-leather'
                 }`}
               >
                 <div className="relative">
-                  {u.photoURL ? (
-                    <img src={u.photoURL} alt={u.displayName} className="w-10 h-10 rounded-full border-2 border-antique-gold/20" />
+                  {u.photo_url ? (
+                    <img src={u.photo_url} alt={u.display_name} className="w-10 h-10 rounded-full border-2 border-antique-gold/20" />
                   ) : (
                     <div className="w-10 h-10 rounded-full bg-saddle-brown/10 flex items-center justify-center border-2 border-antique-gold/20">
                       <UserIcon size={20} className="text-saddle-brown" />
                     </div>
                   )}
-                  {(u.uid === 'admin_01' || u.role === 'admin') && (
+                  {(u.id === 'admin_01' || u.role === 'admin') && (
                     <div className="absolute -top-1 -right-1 bg-antique-gold text-leather p-0.5 rounded-full border border-white shadow-sm">
                       <ShieldCheck size={12} />
                     </div>
                   )}
                 </div>
                 <div className="flex-1 text-left">
-                  <p className="text-sm font-serif font-bold truncate">{u.displayName}</p>
+                  <p className="text-sm font-serif font-bold truncate">{u.display_name}</p>
                   <p className={`text-[10px] uppercase tracking-widest opacity-60 ${u.role === 'admin' ? 'text-antique-gold font-bold' : ''}`}>
-                    {u.uid === 'admin_01' || u.role === 'admin' ? 'Imperial Admin' : 'Scholar'}
+                    {u.id === 'admin_01' || u.role === 'admin' ? 'Imperial Admin' : 'Scholar'}
                   </p>
                 </div>
               </button>
@@ -321,7 +332,7 @@ export function PeerChat({ user }: PeerChatProps) {
                   <ArrowLeft size={20} />
                 </button>
                 <div className="relative">
-                  <h4 className="font-serif font-bold text-saddle-brown text-lg">{selectedUser.displayName}</h4>
+                  <h4 className="font-serif font-bold text-saddle-brown text-lg">{selectedUser.display_name}</h4>
                   <div className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
                     <p className="text-[10px] text-saddle-brown/40 uppercase tracking-widest font-bold">In the Library</p>
@@ -350,7 +361,7 @@ export function PeerChat({ user }: PeerChatProps) {
 
             <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar bg-[url('https://www.transparenttextures.com/patterns/cream-paper.png')]">
               {messages.map(msg => {
-                const isOwn = msg.sender_id === user.uid;
+                const isOwn = msg.sender_id === user.id;
                 return (
                   <div key={msg.id} className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
                     <div className={`max-w-[75%] p-4 rounded-3xl shadow-md border ${
@@ -472,9 +483,9 @@ export function PeerChat({ user }: PeerChatProps) {
         <ReportModal
           isOpen={isReportModalOpen}
           onClose={() => setIsReportModalOpen(false)}
-          reporterId={user.uid}
-          reportedId={selectedUser.uid}
-          reportedName={selectedUser.displayName}
+          reporterId={user.id}
+          reportedId={selectedUser.id}
+          reportedName={selectedUser.display_name}
           context="Peer Chat"
         />
       )}

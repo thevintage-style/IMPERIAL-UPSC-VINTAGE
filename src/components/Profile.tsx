@@ -1,64 +1,55 @@
 import React, { useState, useEffect } from 'react';
-import { User } from 'firebase/auth';
-import { db, doc, getDoc, updateDoc, OperationType, handleFirestoreError } from '../lib/firebase';
+import { User as SupabaseUser } from '@supabase/supabase-js';
+import { supabase } from '../lib/supabase';
 import { User as UserIcon, Target, Save, Sparkles, ShieldCheck, UserCircle } from 'lucide-react';
 import { Button } from './ui/button';
 import { motion } from 'motion/react';
 import { AvatarSelector } from './AvatarSelector';
 
+import { UserProfile } from '../types';
+
 interface ProfileProps {
-  user: User;
+  user: SupabaseUser;
+  profile: UserProfile | null;
 }
 
-export function Profile({ user }: ProfileProps) {
-  const [displayName, setDisplayName] = useState(user.displayName || '');
+export function Profile({ user, profile }: ProfileProps) {
+  const [displayName, setDisplayName] = useState('');
   const [studyGoal, setStudyGoal] = useState('');
   const [avatarId, setAvatarId] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState('');
 
   useEffect(() => {
-    const fetchProfile = async () => {
-      const uid = user.uid || (user as any).id;
-      if (!uid) return;
-      const docRef = doc(db, 'users', uid);
-      try {
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          setStudyGoal(data.studyGoal || '');
-          setAvatarId(data.avatarId || '');
-          setDisplayName(data.displayName || user.displayName || '');
-        }
-      } catch (error) {
-        console.error("Error fetching profile:", error);
-      }
-    };
-    fetchProfile();
-  }, [user.uid, (user as any).id]);
+    if (profile) {
+      setStudyGoal(profile.study_goal || '');
+      setAvatarId(profile.avatar_id || '');
+      setDisplayName(profile.full_name || user.user_metadata?.full_name || '');
+    }
+  }, [profile, user.user_metadata]);
 
   const handleSave = async () => {
     setIsSaving(true);
     setMessage('');
-    const uid = user.uid || (user as any).id;
-    const path = `users/${uid}`;
-    const publicPath = `publicProfiles/${uid}`;
+    const uid = user.id;
     try {
-      await updateDoc(doc(db, 'users', uid), {
-        displayName,
-        studyGoal,
-        avatarId,
-        updatedAt: new Date().toISOString()
-      });
-      await updateDoc(doc(db, 'publicProfiles', uid), {
-        displayName,
-        avatarId,
-        updatedAt: new Date().toISOString()
-      });
+      const { error } = await supabase
+        .from('user_profiles')
+        .upsert({
+          id: uid,
+          full_name: displayName,
+          study_goal: studyGoal,
+          avatar_id: avatarId,
+          updated_at: new Date().toISOString()
+        });
+      
+      if (error) throw error;
+
       setMessage('Profile updated in the Imperial Archives.');
       setTimeout(() => setMessage(''), 3000);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, path);
+    } catch (error: any) {
+      console.error("Profile update error:", error);
+      alert("Failed to update profile: " + error.message);
     } finally {
       setIsSaving(false);
     }
@@ -79,7 +70,7 @@ export function Profile({ user }: ProfileProps) {
         <div className="flex flex-col md:flex-row items-center gap-12 mb-12">
           <div className="relative">
             <img 
-              src={user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`} 
+              src={user.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`} 
               alt="Profile" 
               className="w-32 h-32 rounded-full border-4 border-saddle-brown shadow-xl"
               referrerPolicy="no-referrer"
@@ -91,7 +82,7 @@ export function Profile({ user }: ProfileProps) {
           
           <div className="text-center md:text-left">
             <h2 className="text-3xl font-display font-bold text-leather mb-2">Scholar's Folio</h2>
-            <p className="text-saddle-brown font-serif italic">Member of the Imperial Academy since {new Date(user.metadata.creationTime || '').toLocaleDateString()}</p>
+            <p className="text-saddle-brown font-serif italic">Member of the Imperial Academy since {new Date(user.created_at || '').toLocaleDateString()}</p>
           </div>
         </div>
 

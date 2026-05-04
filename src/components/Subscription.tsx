@@ -1,174 +1,48 @@
 import React, { useState, useEffect } from 'react';
-import { User } from 'firebase/auth';
-import { db, doc, updateDoc, serverTimestamp, getDoc, addDoc, collection, OperationType, handleFirestoreError, onSnapshot, query, setDoc } from '../lib/firebase';
-import { Check, Shield, Zap, Crown, CreditCard, QrCode, Copy, Send, RefreshCw } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { User as SupabaseUser } from '@supabase/supabase-js';
+import { Check, Shield, Zap, Crown, CreditCard, RefreshCw } from 'lucide-react';
 import { Button } from './ui/button';
 import { motion } from 'motion/react';
+import { UserProfile, Plan } from '../types';
 
 interface SubscriptionProps {
-  user: User;
+  user: SupabaseUser;
+  profile: UserProfile | null;
 }
 
-export function Subscription({ user }: SubscriptionProps) {
+export function Subscription({ user, profile }: SubscriptionProps) {
   const [loading, setLoading] = useState(true);
-  const [plans, setPlans] = useState<any[]>([]);
-  const [activeUpi, setActiveUpi] = useState<string>('');
-  const [transactionId, setTransactionId] = useState('');
+  const [plans, setPlans] = useState<Plan[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    // Fetch Plans
-    const plansPath = 'plans';
-    const unsubscribePlans = onSnapshot(collection(db, plansPath), (snapshot) => {
-      const activePlans = snapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() }))
-        .filter((p: any) => p.isActive);
-      setPlans(activePlans);
-      setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, plansPath);
-    });
-
-    // Fetch and Rotate UPI
-    const rotateUpi = async () => {
-      const configRef = doc(db, 'settings/appConfig');
-      const configSnap = await getDoc(configRef);
-      const upiIdsSnap = await getDoc(doc(db, 'upiIds', 'list')); // This is a bit inefficient, better to use a collection
-      
-      // Let's use the collection instead
-      const upisQuery = query(collection(db, 'upiIds'));
-      const upisSnap = await getDoc(doc(db, 'settings/appConfig')); // Re-using for counter
-      
-      const upiListSnapshot = await onSnapshot(collection(db, 'upiIds'), (snapshot) => {
-        const activeUpis = snapshot.docs
-          .map(doc => ({ id: doc.id, ...doc.data() } as any))
-          .filter((u: any) => u.isActive);
-        
-        if (activeUpis.length === 0) return;
-
-        // Rotation Logic: Every 10th student
-        const currentCounter = configSnap.data()?.upiRotationCounter || 0;
-        const upiIndex = Math.floor(currentCounter / 10) % activeUpis.length;
-        setActiveUpi(activeUpis[upiIndex].upiId);
-      });
-    };
-
-    rotateUpi();
-    return () => unsubscribePlans();
+    fetchPlans();
   }, []);
 
-  const handleRazorpayPayment = async (plan: any) => {
-    setSubmitting(true);
+  const fetchPlans = async () => {
+    setLoading(true);
     try {
-      // Diagnostic: Initiating treasury fetch
-      console.log(`[Imperial Hub] Requesting order for plan: ${plan.name} (${plan.price} INR)`);
+      const { data, error } = await supabase
+        .from('plans')
+        .select('*')
+        .eq('is_active', true)
+        .order('price', { ascending: true });
       
-      const response = await fetch('/api/razorpay', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount: plan.price })
-      });
-      
-      const contentType = response.headers.get("content-type");
-      const isJson = contentType && contentType.includes("application/json");
-
-      if (!isJson) {
-        const text = await response.text();
-        console.error("Non-JSON response received from Treasury:", text);
-        alert("Treasury Connection Failed: The Imperial server returned an invalid response. Please verify your internet connection or server status.");
-        setSubmitting(false);
-        return;
-      }
-
-      const order = await response.json();
-      
-      // Diagnostic: Log backend response
-      console.log('[Treasury] Ledger Response:', order);
-
-      // Handle External Payment Link if provided in plan
-      if (plan.paymentLink) {
-        window.open(plan.paymentLink, '_blank');
-        setSubmitting(false);
-        return;
-      }
-
-      if (!response.ok || order.error || order.status === 'shield_active') {
-        // High-priority: Authentication/Configuration/Mixup/Shield failures
-        if (order.status === 'shield_active') {
-          console.error("[Imperial Treasury] Shield Active Triggered:", order);
-          alert(`📜 Treasury Alert: The Imperial Archives require a configuration update. Please check the Vercel Dashboard.\n\nReason: ${order.reason} (${order.field})`);
-          setSubmitting(false);
-          return;
-        }
-
-        if (order.error === 'Environment Variable Mixup') {
-          console.error("[Imperial Treasury] Safety Shield Triggered: Mixup detected.");
-          alert("📜 Treasury Alert: Environment Variable Mixup Detected!\n\nCheck your Settings (Secrets) for swapped keys. A Firebase key might be in a Supabase or Razorpay field.");
-          setSubmitting(false);
-          return;
-        }
-
-        if (order.code === 'AUTH_FAILURE') {
-          console.error("[Imperial Treasury] Authentication failure detected:", order);
-          alert("Key Authentication Failed: Your Razorpay API Key ID or Secret is invalid. Please verify them in the Settings menu (Secrets).");
-          setSubmitting(false);
-          return;
-        }
-
-        if (order.code === 'CONFIG_ERROR' || order.code === 'MALFORMED_KEY') {
-          console.error("[Imperial Treasury] Configuration Dispute:", order);
-          alert(`📜 Treasury Proclamation:\n${order.error}`);
-          setSubmitting(false);
-          return;
-        }
-
-        const errorDetail = order.error || order.description || "Imperial Protocol Exception";
-        console.error("[Imperial Treasury] Transactional Friction:", order);
-        alert("Treasury Connection Failed: " + errorDetail);
-        setSubmitting(false);
-        return;
-      }
-
-      if (!order.id) {
-        throw new Error("The Treasury failed to issue a valid Order ID.");
-      }
-
-      const razorpayKey = order.key || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "rzp_test_mock";
-
-      const options = {
-        key: razorpayKey,
-        amount: order.amount,
-        currency: order.currency,
-        name: "Imperial Scholar",
-        description: `Commission for ${plan.name}`,
-        image: "https://api.dicebear.com/7.x/avataaars/svg?seed=Imperial",
-        order_id: order.id,
-        handler: async function (response: any) {
-          // Verify payment on client side (optional but good for UX)
-          alert("Tribute received! The Grand Vizier is processing your commission.");
-          // In a real app, you'd call a verification API here
-          // For now, we rely on the webhook to update the DB
-        },
-        prefill: {
-          name: user.displayName,
-          email: user.email,
-        },
-        notes: {
-          userId: user.uid,
-          planId: plan.id
-        },
-        theme: {
-          color: "#8B4513"
-        }
-      };
-
-      const rzp = new (window as any).Razorpay(options);
-      rzp.open();
-    } catch (error: any) {
-      console.error("Payment Error:", error);
-      alert("The Imperial Treasury encountered an error: " + error.message);
+      if (error) throw error;
+      setPlans(data || []);
+    } catch (error) {
+      console.error("Error fetching plans:", error);
     } finally {
-      setSubmitting(false);
+      setLoading(false);
+    }
+  };
+
+  const handleInstamojoPayment = (plan: Plan) => {
+    if (plan.instamojo_url) {
+      window.open(plan.instamojo_url, '_blank');
+    } else {
+      alert("This plan is currently being finalized in the Imperial Treasury. Please try again later.");
     }
   };
 
@@ -188,9 +62,9 @@ export function Subscription({ user }: SubscriptionProps) {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-        {plans.map((plan, idx) => (
+        {plans.map((plan) => (
           <motion.div
-            key={idx}
+            key={plan.id}
             whileHover={{ y: -10 }}
             className={`relative p-8 rounded-[40px] border-2 transition-all duration-300 flex flex-col ${
               plan.highlight 
@@ -210,17 +84,17 @@ export function Subscription({ user }: SubscriptionProps) {
               </div>
               <div className="text-right">
                 <span className="text-4xl font-serif font-bold">₹{plan.price}</span>
-                <span className={`text-sm block ${plan.highlight ? "text-white/60" : "text-[#5A5A40]/60"}`}>/ {plan.duration}</span>
+                <span className={`text-sm block ${plan.highlight ? "text-white/60" : "text-[#5A5A40]/60"}`}>/ Access Tier</span>
               </div>
             </div>
 
             <h3 className="text-2xl font-serif font-bold mb-2">{plan.name}</h3>
             <p className={`text-sm mb-8 font-serif italic ${plan.highlight ? "text-white/60" : "text-[#5A5A40]/60"}`}>
-              Imperial Access Tier
+              Official Imperial Grade
             </p>
 
             <ul className="space-y-4 mb-12 flex-1">
-              {plan.features.map((feature: string, fIdx: number) => (
+              {(plan.features || []).map((feature: string, fIdx: number) => (
                 <li key={fIdx} className="flex items-center gap-3 text-sm">
                   <div className={`p-1 rounded-full ${plan.highlight ? "bg-[#5A5A40]/40" : "bg-[#5A5A40]/10"}`}>
                     <Check size={12} className="text-[#5A5A40]" />
@@ -230,26 +104,31 @@ export function Subscription({ user }: SubscriptionProps) {
               ))}
             </ul>
 
-            {plan.price > 0 && (
+            {profile?.plan_type === 'Imperial' && plan.name.toLowerCase().includes('imperial') ? (
               <Button
-                onClick={() => handleRazorpayPayment(plan)}
+                disabled
+                className="w-full py-8 rounded-2xl text-lg font-bold bg-[#1A1612]/5 text-[#1A1612]/40"
+              >
+                Current Active Plan
+              </Button>
+            ) : plan.price === 0 && (!profile || profile.plan_type === 'Free') ? (
+               <Button
+                disabled
+                className="w-full py-8 rounded-2xl text-lg font-bold bg-[#1A1612]/5 text-[#1A1612]/40"
+              >
+                Current Plan
+              </Button>
+            ) : (
+              <Button
+                onClick={() => handleInstamojoPayment(plan)}
                 disabled={submitting}
                 className={`w-full py-8 rounded-2xl text-lg font-bold transition-all duration-300 ${
                   plan.highlight 
-                    ? "bg-antique-gold hover:bg-saddle-brown text-leather shadow-lg" 
-                    : "bg-parchment text-saddle-brown hover:bg-leather/10"
+                    ? "bg-[#D4AF37] hover:bg-[#8B4513] text-white shadow-lg" 
+                    : "bg-[#F5F2E7] text-[#8B4513] hover:bg-[#1A1612]/10"
                 }`}
               >
                 {submitting ? "Preparing Tribute..." : "Commission Now"}
-              </Button>
-            )}
-            
-            {plan.price === 0 && (
-              <Button
-                disabled
-                className="w-full py-8 rounded-2xl text-lg font-bold bg-leather/5 text-leather/40"
-              >
-                Current Plan
               </Button>
             )}
           </motion.div>
@@ -261,14 +140,17 @@ export function Subscription({ user }: SubscriptionProps) {
           <div className="p-4 bg-white rounded-2xl shadow-sm">
             <Shield className="text-[#5A5A40]" size={32} />
           </div>
-          <div>
+          <div className="flex-1">
             <h4 className="font-serif font-bold text-lg">Secure Transactions</h4>
-            <p className="text-sm text-[#5A5A40]/60 font-serif">All payments are manually verified by the Grand Vizier. Please allow up to 24 hours for activation.</p>
+            <p className="text-sm text-[#5A5A40]/60 font-serif mb-2">All payments are manually verified by the Grand Vizier.</p>
+            <p className="text-xs font-bold text-[#8B4513] uppercase tracking-wider bg-[#D4AF37]/10 p-3 rounded-xl border border-[#D4AF37]/20">
+              Note: After payment, please wait for admin verification to activate your pro features.
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-4">
           <CreditCard className="text-[#5A5A40]/40" size={24} />
-          <span className="text-xs font-bold uppercase tracking-widest text-[#5A5A40]/40">Verified UPI Channel</span>
+          <span className="text-xs font-bold uppercase tracking-widest text-[#5A5A40]/40">Verified Payment Channel</span>
         </div>
       </div>
     </div>

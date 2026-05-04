@@ -1,14 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { User as FirebaseUser } from 'firebase/auth';
 import { User as SupabaseUser } from '@supabase/supabase-js';
 import { motion, AnimatePresence } from 'motion/react';
 import { Mic, MicOff, Volume2, VolumeX, Sparkles, Zap, Brain, MessageSquare, History } from 'lucide-react';
 import { routeAIRequest } from '../services/aiRouter';
-import { db, doc, updateDoc, collection, addDoc, serverTimestamp } from '../lib/firebase';
 import { supabase } from '../lib/supabase';
 
 interface OracleOSProps {
-  user: FirebaseUser | SupabaseUser;
+  user: SupabaseUser;
   onCommand?: (command: string, response: string) => void;
 }
 
@@ -105,7 +103,7 @@ export function OracleOS({ user, onCommand }: OracleOSProps) {
     setStatus('processing');
 
     try {
-      const uid = (user as any).uid || (user as any).id;
+      const uid = user.id;
       
       // CONTEXTUAL MEMORY: Fetch recent logs if the query is about progress
       let memoryContext = "";
@@ -118,7 +116,7 @@ export function OracleOS({ user, onCommand }: OracleOSProps) {
           .order('date', { ascending: false });
         
         if (logs && logs.length > 0) {
-          memoryContext = `User's recent study logs: ${logs.map(l => `${l.date}: ${l.subject} for ${l.duration_minutes} mins`).join('; ')}`;
+          memoryContext = `User's recent study logs: ${logs.map(l => `${l.date}: ${l.subject} for ${l.duration} mins`).join('; ')}`;
         }
       }
 
@@ -137,8 +135,9 @@ export function OracleOS({ user, onCommand }: OracleOSProps) {
          await supabase.from('study_logs').insert({
            user_id: uid,
            subject: subjectMatch ? subjectMatch[1] : "General Study",
-           duration_minutes: durationMatch ? parseInt(durationMatch[1]) * 60 : 60,
-           notes: "Logged via Voice Command"
+           duration: durationMatch ? parseInt(durationMatch[1]) * 60 : 60,
+           notes: "Logged via Voice Command",
+           date: new Date().toISOString().split('T')[0]
          });
       }
 

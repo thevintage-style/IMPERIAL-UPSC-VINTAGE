@@ -1,152 +1,224 @@
 import React, { useState, useEffect } from 'react';
-import { User as FirebaseUser } from 'firebase/auth';
 import { User as SupabaseUser } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer,
+  Cell
 } from 'recharts';
-import { Clock, Target, CheckCircle2, Plus, BarChart3, Sparkles, Zap } from 'lucide-react';
+import { Book, Clock, Target, CheckCircle2, Plus, BarChart3 } from 'lucide-react';
 import { Button } from './ui/button';
 
 interface DashboardProps {
-  user: FirebaseUser | SupabaseUser;
+  user: SupabaseUser;
 }
 
 export function Dashboard({ user }: DashboardProps) {
   const [logs, setLogs] = useState<any[]>([]);
   const [newLog, setNewLog] = useState({ subject: 'History', duration: 60 });
   const [isLoading, setIsLoading] = useState(true);
-  const [isImperial, setIsImperial] = useState(false);
-  const [usageCount, setUsageCount] = useState(0); 
 
-  const userId = (user as any).uid || (user as any).id;
-  const PAYMENT_LINK = "https://www.instamojo.com/@Imperialvintage05"
+  const userId = user.id;
 
   useEffect(() => {
     if (!userId) return;
 
-    const fetchData = async () => {
+    const fetchLogs = async () => {
       setIsLoading(true);
-      const { data: profile } = await supabase.from('profiles').select('plan_type').eq('id', userId).single();
-      if (profile?.plan_type === 'imperial') setIsImperial(true);
-      const { data: logData } = await supabase.from('study_logs').select('*').eq('user_id', userId);
-      setLogs(logData || []);
-      setIsLoading(false);
-    };
-    fetchData();
-  }, [userId]);
+      try {
+        const { data, error } = await supabase
+          .from('study_logs')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false });
 
-  const handleOracleClick = () => {
-    if (!isImperial && usageCount >= 3) {
-      alert("🚀 Free limit reached! Upgrade to Imperial for unlimited Oracle AI access.");
-      window.open(PAYMENT_LINK, '_blank');
-    } else {
-      alert(`Opening Oracle AI... (${isImperial ? 'Unlimited Access' : (3 - usageCount) + ' free uses left'})`);
-      if (!isImperial) setUsageCount(usageCount + 1);
-    }
-  };
+        if (error) throw error;
+        setLogs(data || []);
+      } catch (error) {
+        console.error("Error fetching study logs:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchLogs();
+
+    const subscription = supabase
+      .channel('study_logs_changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'study_logs', filter: `user_id=eq.${userId}` }, fetchLogs)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(subscription);
+    };
+  }, [userId]);
 
   const addLog = async () => {
     if (!userId) return;
-    await supabase.from('study_logs').insert([{ ...newLog, user_id: userId, date: new Date().toISOString().split('T')[0] }]);
+    try {
+      const { error } = await supabase
+        .from('study_logs')
+        .insert([{
+          ...newLog,
+          user_id: userId,
+          date: new Date().toISOString().split('T')[0]
+        }]);
+      if (error) throw error;
+    } catch (error) {
+      console.error("Error adding study log:", error);
+    }
   };
 
   const chartData = logs.reduce((acc: any[], log) => {
     const existing = acc.find(a => a.subject === log.subject);
-    if (existing) { existing.hours += log.duration / 60; } 
-    else { acc.push({ subject: log.subject, hours: log.duration / 60 }); }
+    if (existing) {
+      existing.hours += log.duration / 60;
+    } else {
+      acc.push({ subject: log.subject, hours: log.duration / 60 });
+    }
     return acc;
   }, []);
 
-  const COLORS = ['#8B4513', '#D4AF37', '#1A1612'];
+  const COLORS = ['#8B4513', '#D4AF37', '#1A1612', '#5A5A40', '#4A4A30'];
 
   return (
-    <div className="space-y-8">
-      {/* Oracle AI Section - NO TEST SERIES MENTIONED */}
-      <div 
-        onClick={handleOracleClick}
-        className="cursor-pointer group relative overflow-hidden bg-gradient-to-r from-[#1A1612] to-[#3D2B1F] p-8 rounded-3xl border border-[#D4AF37]/30 shadow-2xl transition-all"
-      >
-        <div className="flex flex-col md:flex-row justify-between items-center gap-6">
-          <div className="text-center md:text-left">
-            <div className="flex items-center justify-center md:justify-start gap-2 mb-2">
-              <Sparkles className="text-[#D4AF37]" size={20} />
-              <span className="text-[#D4AF37] font-serif text-xs font-bold uppercase tracking-[0.2em]">Imperial Oracle AI</span>
-            </div>
-            <h2 className="text-3xl font-serif font-bold text-white mb-2">Ask the Oracle</h2>
-            <p className="text-white/60">Expert UPSC analysis. {isImperial ? "Unlimited Access." : "Try it for free."}</p>
-          </div>
-          
-          <div className="flex flex-col items-center gap-3">
-            {!isImperial && (
-              <div className="px-4 py-1 bg-white/10 rounded-full border border-white/20 text-white text-xs">
-                {3 - usageCount > 0 ? `${3 - usageCount} Free Uses Left` : "Limit Reached"}
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      {/* Stats Overview */}
+      <div className="lg:col-span-2 space-y-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="bg-white p-6 rounded-3xl border border-[#8B4513]/10 shadow-sm">
+            <div className="flex items-center gap-4 mb-4">
+              <div className="p-3 bg-[#8B4513]/10 rounded-2xl">
+                <Clock className="text-[#8B4513]" size={24} />
               </div>
-            )}
-            <button className="px-8 py-3 bg-[#D4AF37] text-[#1A1612] rounded-xl font-bold">
-              {isImperial ? "Launch AI" : (usageCount >= 3 ? "Upgrade Now" : "Try for Free")}
-            </button>
+              <span className="font-serif font-bold text-[#8B4513]">Total Hours</span>
+            </div>
+            <p className="text-4xl font-serif font-bold">{chartData.reduce((a, b) => a + b.hours, 0).toFixed(1)}</p>
+            <p className="text-xs text-[#8B4513]/60 mt-2 uppercase tracking-widest">This Season</p>
+          </div>
+          <div className="bg-white p-6 rounded-3xl border border-[#8B4513]/10 shadow-sm">
+            <div className="flex items-center gap-4 mb-4">
+              <div className="p-3 bg-[#8B4513]/10 rounded-2xl">
+                <Target className="text-[#8B4513]" size={24} />
+              </div>
+              <span className="font-serif font-bold text-[#8B4513]">Syllabus</span>
+            </div>
+            <p className="text-4xl font-serif font-bold">42%</p>
+            <p className="text-xs text-[#8B4513]/60 mt-2 uppercase tracking-widest">General Studies</p>
+          </div>
+          <div className="bg-white p-6 rounded-3xl border border-[#8B4513]/10 shadow-sm">
+            <div className="flex items-center gap-4 mb-4">
+              <div className="p-3 bg-[#8B4513]/10 rounded-2xl">
+                <CheckCircle2 className="text-[#8B4513]" size={24} />
+              </div>
+              <span className="font-serif font-bold text-[#8B4513]">Streak</span>
+            </div>
+            <p className="text-4xl font-serif font-bold">12</p>
+            <p className="text-xs text-[#8B4513]/60 mt-2 uppercase tracking-widest">Days Active</p>
+          </div>
+        </div>
+
+        {/* Effort Chart */}
+        <div className="bg-white p-8 rounded-3xl border border-[#8B4513]/10 shadow-sm">
+          <h3 className="font-serif text-xl font-bold mb-8 flex items-center gap-3">
+            <BarChart3 size={20} className="text-[#8B4513]" />
+            Subject-wise Effort
+          </h3>
+          <div className="h-[300px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#8B451311" />
+                <XAxis 
+                  dataKey="subject" 
+                  axisLine={false} 
+                  tickLine={false} 
+                  tick={{ fill: '#8B4513', fontSize: 12, fontFamily: 'serif' }}
+                />
+                <YAxis 
+                  axisLine={false} 
+                  tickLine={false} 
+                  tick={{ fill: '#8B4513', fontSize: 12, fontFamily: 'serif' }}
+                />
+                <Tooltip 
+                  cursor={{ fill: '#8B451308' }}
+                  contentStyle={{ 
+                    borderRadius: '16px', 
+                    border: '1px solid #8B451322',
+                    fontFamily: 'serif',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.05)'
+                  }}
+                />
+                <Bar dataKey="hours" radius={[8, 8, 0, 0]}>
+                  {chartData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2 space-y-8">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-white p-6 rounded-3xl border border-[#8B4513]/10 shadow-sm">
-              <div className="flex items-center gap-4 mb-4">
-                <Clock className="text-[#8B4513]" size={24} />
-                <span className="font-serif font-bold text-[#8B4513]">Study Hours</span>
-              </div>
-              <p className="text-4xl font-serif font-bold">{chartData.reduce((a, b) => a + b.hours, 0).toFixed(1)}</p>
-            </div>
-            <div className="bg-white p-6 rounded-3xl border border-[#8B4513]/10 shadow-sm">
-              <div className="flex items-center gap-4 mb-4">
-                <Target className="text-[#8B4513]" size={24} />
-                <span className="font-serif font-bold text-[#8B4513]">Syllabus</span>
-              </div>
-              <p className="text-4xl font-serif font-bold">42%</p>
-            </div>
-            
-            {!isImperial && (
-              <div 
-                onClick={() => window.open(PAYMENT_LINK, '_blank')}
-                className="cursor-pointer bg-amber-50 p-6 rounded-3xl border-2 border-dashed border-amber-200 flex flex-col items-center justify-center hover:bg-amber-100 transition-colors"
+      {/* Sidebar: Add Log & Recent */}
+      <div className="space-y-8">
+        <div className="bg-white p-8 rounded-3xl border border-[#8B4513]/10 shadow-sm">
+          <h3 className="font-serif text-xl font-bold mb-6">Log Session</h3>
+          <div className="space-y-4">
+            <div>
+              <label className="text-xs uppercase tracking-widest text-[#8B4513]/60 font-bold mb-2 block">Subject</label>
+              <select 
+                value={newLog.subject}
+                onChange={(e) => setNewLog({ ...newLog, subject: e.target.value })}
+                className="w-full bg-[#F5F2E7] border-none rounded-xl p-3 font-serif focus:ring-2 focus:ring-[#8B4513]"
               >
-                <Zap className="text-amber-600 mb-1" size={20} />
-                <span className="font-bold text-amber-900 text-sm italic">Get Imperial</span>
-                <p className="text-[10px] text-amber-800 text-center">Unlimited Oracle AI for ₹99</p>
-              </div>
-            )}
-          </div>
-
-          <div className="bg-white p-8 rounded-3xl border border-[#8B4513]/10 shadow-sm h-[300px]">
-             <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#8B451311" />
-                  <XAxis dataKey="subject" tick={{ fill: '#8B4513', fontSize: 12 }} />
-                  <YAxis tick={{ fill: '#8B4513', fontSize: 12 }} />
-                  <Bar dataKey="hours" radius={[8, 8, 0, 0]}>
-                    {chartData.map((e, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+                <option>History</option>
+                <option>Geography</option>
+                <option>Polity</option>
+                <option>Economics</option>
+                <option>Ethics</option>
+                <option>Current Affairs</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs uppercase tracking-widest text-[#8B4513]/60 font-bold mb-2 block">Duration (min)</label>
+              <input 
+                type="number"
+                value={newLog.duration}
+                onChange={(e) => setNewLog({ ...newLog, duration: parseInt(e.target.value) })}
+                className="w-full bg-[#F5F2E7] border-none rounded-xl p-3 font-serif focus:ring-2 focus:ring-[#8B4513]"
+              />
+            </div>
+            <Button 
+              onClick={addLog}
+              className="w-full bg-[#8B4513] hover:bg-[#1A1612] text-[#F5F2E7] rounded-xl py-6 shadow-md"
+            >
+              <Plus size={18} className="mr-2" />
+              Record Entry
+            </Button>
           </div>
         </div>
 
         <div className="bg-white p-8 rounded-3xl border border-[#8B4513]/10 shadow-sm">
-          <h3 className="font-serif text-xl font-bold mb-6 text-[#1A1612]">Log Session</h3>
+          <h3 className="font-serif text-xl font-bold mb-6">Recent Ledger</h3>
           <div className="space-y-4">
-            <select 
-              value={newLog.subject} 
-              onChange={(e) => setNewLog({ ...newLog, subject: e.target.value })}
-              className="w-full bg-[#F5F2E7] border-none rounded-xl p-3"
-            >
-              <option>History</option><option>Geography</option><option>Polity</option>
-            </select>
-            <Button onClick={addLog} className="w-full bg-[#8B4513] text-[#F5F2E7] rounded-xl py-6">
-              Record Entry
-            </Button>
+            {isLoading ? (
+              <div className="text-center py-4 text-xs text-[#8B4513]/40">Loading ledger...</div>
+            ) : (
+              logs.slice(0, 5).map((log) => (
+                <div key={log.id} className="flex items-center justify-between p-3 bg-[#F5F2E7]/50 rounded-2xl border border-[#8B4513]/5">
+                  <div>
+                    <p className="font-serif font-bold text-sm">{log.subject}</p>
+                    <p className="text-[10px] text-[#8B4513]/60 uppercase tracking-tighter">{log.date}</p>
+                  </div>
+                  <span className="text-sm font-serif italic">{log.duration}m</span>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>

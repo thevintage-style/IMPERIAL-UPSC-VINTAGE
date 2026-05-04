@@ -1,18 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { User } from 'firebase/auth';
+import { User as SupabaseUser } from '@supabase/supabase-js';
 import { Sparkles, Send, Bot, User as UserIcon, Loader2, Info, Mic, MicOff, Volume2 } from 'lucide-react';
 import { Button } from './ui/button';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from '@google/genai';
 import ReactMarkdown from 'react-markdown';
-import { db, collection, getDocs, query, orderBy, limit } from '../lib/firebase';
 import { supabase } from '../lib/supabase';
 
+import { UserProfile } from '../types';
+
 interface OracleProps {
-  user: User;
+  user: SupabaseUser;
+  profile: UserProfile | null;
 }
 
-export function Oracle({ user }: OracleProps) {
+export function Oracle({ user, profile }: OracleProps) {
   const [messages, setMessages] = useState<{ role: 'user' | 'bot', content: string }[]>([
     { role: 'bot', content: "Greetings, Aspirant. I am the Oracle, your Imperial Mentor. I have access to the latest intelligence from The Hindu, Indian Express, and PIB. How shall we refine your preparation today?" }
   ]);
@@ -28,7 +30,7 @@ export function Oracle({ user }: OracleProps) {
   const recognitionRef = useRef<any>(null);
   const wakeWordRecognitionRef = useRef<any>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const userId = (user as any).uid || (user as any).id;
+  const userId = user.id;
 
   // Wake-Word Listener (Oracle)
   useEffect(() => {
@@ -73,12 +75,14 @@ export function Oracle({ user }: OracleProps) {
     const fetchUserContext = async () => {
       if (!userId) return;
       try {
-        // Fetch latest journal
-        const journalSnap = await getDocs(query(
-          collection(db, `users/${userId}/journals`),
-          orderBy('createdAt', 'desc'),
-          limit(1)
-        ));
+        // Fetch latest journal from Supabase
+        const { data: journal } = await supabase
+          .from('journals')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
         
         // Fetch latest study logs
         const { data: studyLogs } = await supabase
@@ -89,11 +93,11 @@ export function Oracle({ user }: OracleProps) {
           .limit(3);
 
         let context = "";
-        if (!journalSnap.empty) {
-          context += `User's latest journal: ${journalSnap.docs[0].data().content}\n`;
+        if (journal) {
+          context += `User's latest journal: ${journal.content}\n`;
         }
         if (studyLogs && studyLogs.length > 0) {
-          context += `Recent Study Sessions: ${studyLogs.map(l => `${l.subject} for ${l.duration_minutes}m`).join(', ')}`;
+          context += `Recent Study Sessions: ${studyLogs.map(l => `${l.subject} for ${l.duration}m`).join(', ')}`;
         }
         setUserContext(context);
       } catch (err) {

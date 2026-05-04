@@ -1,16 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { User } from 'firebase/auth';
-import { 
-  collection, 
-  query, 
-  orderBy, 
-  onSnapshot, 
-  doc, 
-  updateDoc, 
-  deleteDoc,
-  where
-} from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { User as SupabaseUser } from '@supabase/supabase-js';
+import { supabase } from '../lib/supabase';
 import { 
   ShieldAlert, 
   CheckCircle, 
@@ -28,18 +18,18 @@ import { motion, AnimatePresence } from 'motion/react';
 
 interface Report {
   id: string;
-  reporterId: string;
-  reportedId: string;
-  reportedName: string;
+  reporter_id: string;
+  reported_id: string;
+  reported_name: string;
   reason: string;
   details: string;
   context?: string;
   status: 'pending' | 'investigating' | 'resolved' | 'dismissed';
-  createdAt: any;
+  created_at: string;
 }
 
 interface RulesAndRegulationsProps {
-  user: User;
+  user: SupabaseUser;
 }
 
 export function RulesAndRegulations({ user }: RulesAndRegulationsProps) {
@@ -47,16 +37,33 @@ export function RulesAndRegulations({ user }: RulesAndRegulationsProps) {
   const [filter, setFilter] = useState<'all' | 'pending' | 'resolved'>('all');
 
   useEffect(() => {
-    const q = query(collection(db, 'reports'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setReports(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Report)));
-    });
-    return () => unsubscribe();
+    fetchReports();
+
+    const subscription = supabase
+      .channel('reports_changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' }, fetchReports)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(subscription);
+    };
   }, []);
+
+  const fetchReports = async () => {
+    const { data, error } = await supabase
+      .from('reports')
+      .select('*')
+      .order('created_at', { ascending: false });
+    
+    if (data) setReports(data);
+  };
 
   const handleStatusChange = async (reportId: string, status: Report['status']) => {
     try {
-      await updateDoc(doc(db, 'reports', reportId), { status });
+      await supabase
+        .from('reports')
+        .update({ status })
+        .eq('id', reportId);
     } catch (error) {
       console.error("Error updating report status:", error);
     }
@@ -65,7 +72,10 @@ export function RulesAndRegulations({ user }: RulesAndRegulationsProps) {
   const handleDeleteReport = async (reportId: string) => {
     if (confirm("Are you sure you want to expunge this report from the Imperial Records?")) {
       try {
-        await deleteDoc(doc(db, 'reports', reportId));
+        await supabase
+          .from('reports')
+          .delete()
+          .eq('id', reportId);
       } catch (error) {
         console.error("Error deleting report:", error);
       }
@@ -132,7 +142,7 @@ export function RulesAndRegulations({ user }: RulesAndRegulationsProps) {
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <h3 className="text-xl font-serif font-bold text-leather">Report against {report.reportedName}</h3>
+                        <h3 className="text-xl font-serif font-bold text-leather">Report against {report.reported_name}</h3>
                         <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-full border ${
                           report.status === 'pending' ? 'border-orange-200 text-orange-600 bg-orange-50' :
                           report.status === 'investigating' ? 'border-blue-200 text-blue-600 bg-blue-50' :
@@ -144,7 +154,7 @@ export function RulesAndRegulations({ user }: RulesAndRegulationsProps) {
                       </div>
                       <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-saddle-brown/40 font-bold mt-1">
                         <Clock size={10} />
-                        {report.createdAt?.toDate().toLocaleString() || 'Recently'}
+                        {new Date(report.created_at).toLocaleString() || 'Recently'}
                         <span className="mx-1">•</span>
                         <AlertTriangle size={10} />
                         Reason: {report.reason}

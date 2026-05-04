@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User } from 'firebase/auth';
+import { User as SupabaseUser } from '@supabase/supabase-js';
 import { GoogleGenAI } from "@google/genai";
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -15,12 +15,15 @@ import {
 } from 'lucide-react';
 import { Button } from './ui/button';
 
+import { UserProfile } from '../types';
+
 interface VedicDashboardProps {
-  user: User;
+  user: SupabaseUser;
+  profile: UserProfile | null;
   setActiveTab: (tab: string) => void;
 }
 
-export function VedicDashboard({ user, setActiveTab }: VedicDashboardProps) {
+export function VedicDashboard({ user, profile, setActiveTab }: VedicDashboardProps) {
   const [quote, setQuote] = useState<string>("Loading scholarly wisdom...");
   const [author, setAuthor] = useState<string>("The Imperial Oracle");
   const [isLoadingQuote, setIsLoadingQuote] = useState(true);
@@ -60,6 +63,8 @@ export function VedicDashboard({ user, setActiveTab }: VedicDashboardProps) {
     { label: 'Rank Estimate', value: 'Top 5%', icon: TrendingUp, color: 'text-green-500' },
   ];
 
+  const displayName = user.user_metadata?.full_name || user.email?.split('@')[0];
+
   return (
     <div className="space-y-8 pb-12 relative">
       {/* Welcome Banner */}
@@ -67,7 +72,7 @@ export function VedicDashboard({ user, setActiveTab }: VedicDashboardProps) {
         <div className="absolute top-0 right-0 w-64 h-64 bg-antique-gold/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl" />
         <div className="relative z-10 space-y-4">
           <h1 className="text-5xl font-display font-bold tracking-tight">
-            Welcome, <span className="handwritten-highlight text-leather">{user.displayName}</span>
+            Welcome, <span className="handwritten-highlight text-leather">{displayName}</span>
           </h1>
           <p className="text-xl font-serif italic text-parchment/60 max-w-2xl">
             "The journey of a thousand miles begins with a single step into the Imperial Archives."

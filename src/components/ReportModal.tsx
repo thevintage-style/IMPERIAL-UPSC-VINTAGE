@@ -2,8 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AlertTriangle, X, ShieldAlert, Send } from 'lucide-react';
 import { Button } from './ui/button';
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 
 interface ReportModalProps {
   isOpen: boolean;
@@ -23,15 +22,15 @@ export function ReportModal({ isOpen, onClose, reporterId, reportedId, reportedN
     if (!reason) return;
     setIsSubmitting(true);
     try {
-      await addDoc(collection(db, 'reports'), {
-        reporterId,
-        reportedId,
-        reportedName,
+      await supabase.from('reports').insert({
+        reporter_id: reporterId,
+        reported_id: reportedId,
+        reported_name: reportedName,
         reason,
         details,
         context,
         status: 'pending',
-        createdAt: serverTimestamp()
+        created_at: new Date().toISOString()
       });
       alert("The Imperial Censors have received your report. We shall investigate this breach of conduct with utmost priority.");
       onClose();

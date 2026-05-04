@@ -1,21 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { User as FirebaseUser } from 'firebase/auth';
+import React, { useState, useEffect } from 'react';
 import { User as SupabaseUser } from '@supabase/supabase-js';
 import { supabase, isConfigured } from '../lib/supabase';
-import { 
-  collection, 
-  query, 
-  where, 
-  orderBy, 
-  onSnapshot, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc, 
-  doc, 
-  serverTimestamp,
-  getDocs
-} from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { 
   Folder as FolderIcon, 
   FileText, 
@@ -32,7 +17,10 @@ import {
   ArrowRight,
   X,
   RefreshCw,
-  Upload
+  Upload,
+  Sparkles,
+  Zap,
+  BookOpen
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { motion, AnimatePresence } from 'motion/react';
@@ -44,19 +32,25 @@ interface VaultItem {
   type: 'video' | 'pdf' | 'link' | 'note' | 'map_marker';
   url?: string;
   content?: string;
-  folderId: string | null;
-  createdAt: any;
+  analysis?: {
+    summary: string;
+    gs_paper: string;
+    prelims_facts: string[];
+    mains_dimensions: string[];
+  };
+  folder_id: string | null;
+  created_at: string;
 }
 
 interface VaultFolder {
   id: string;
   name: string;
-  parentId: string | null;
-  createdAt: any;
+  parent_id: string | null;
+  created_at: string;
 }
 
 interface PersonalVaultProps {
-  user: FirebaseUser | SupabaseUser;
+  user: SupabaseUser;
 }
 
 export function PersonalVault({ user }: PersonalVaultProps) {
@@ -77,14 +71,75 @@ export function PersonalVault({ user }: PersonalVaultProps) {
   const [confirmDelete, setConfirmDelete] = useState<{id: string, type: 'item' | 'folder'} | null>(null);
 
   const [isUploading, setIsUploading] = useState(false);
-  const userId = (user as any).uid || (user as any).id;
+  const userId = user.id;
+
+  // Real-time Folders
+  useEffect(() => {
+    if (!userId) return;
+
+    const fetchFolders = async () => {
+      const { data, error } = await supabase
+        .from('vault_folders')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: true });
+      
+      if (error) {
+        console.error("Error fetching folders:", error);
+      } else {
+        setFolders(data || []);
+      }
+      setIsLoading(false);
+    };
+
+    fetchFolders();
+
+    const channel = supabase
+      .channel('vault_folders_changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vault_folders', filter: `user_id=eq.${userId}` }, fetchFolders)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [userId]);
+
+  // Real-time Items (Notes & Resources)
+  useEffect(() => {
+    if (!userId) return;
+
+    const fetchItems = async () => {
+      const { data, error } = await supabase
+        .from('vault_items')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+      
+      if (error) {
+        console.error("Error fetching items:", error);
+      } else {
+        setItems(data || []);
+      }
+    };
+
+    fetchItems();
+
+    const channel = supabase
+      .channel('vault_items_changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vault_items', filter: `user_id=eq.${userId}` }, fetchItems)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [userId]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !userId) return;
 
     if (!isConfigured) {
-      alert("Imperial Archives Inaccessible: Supabase is not correctly configured. Please check your environment variables.");
+      alert("Imperial Archives Inaccessible: Supabase is not correctly configured.");
       return;
     }
 
@@ -93,115 +148,103 @@ export function PersonalVault({ user }: PersonalVaultProps) {
       const fileName = `${Date.now()}-${file.name}`;
       const filePath = `${userId}/${fileName}`;
       
-      console.log(`[Vault] Attempting upload of ${file.name} to branch ${filePath}`);
-      
-      const { data, error } = await supabase.storage
+      const { error: uploadError } = await supabase.storage
         .from('vault')
         .upload(filePath, file);
 
-      if (error) {
-        console.error('[Supabase Storage Error]', error);
-        throw new Error(error.message || "The Imperial Vault rejected the scroll.");
-      }
+      if (uploadError) throw uploadError;
 
       const { data: { publicUrl } } = supabase.storage
         .from('vault')
         .getPublicUrl(filePath);
 
-      console.log("[Vault] Upload successful. Public URL generated:", publicUrl);
-
-      // Save metadata to Firestore (or Supabase)
-      await addDoc(collection(db, `users/${userId}/notes`), {
+      await supabase.from('vault_items').insert({
         title: file.name,
         type: file.type.includes('pdf') ? 'pdf' : file.type.includes('video') ? 'video' : 'pdf',
         url: publicUrl,
-        userId,
-        folderId: currentFolderId,
-        createdAt: serverTimestamp()
+        user_id: userId,
+        folder_id: currentFolderId,
+        created_at: new Date().toISOString()
       });
 
     } catch (error: any) {
-      console.error('Upload Error Trace:', error);
-      alert(`Scholarly Upload Failed: ${error.message || 'The Imperial Archives are currently offline.'}`);
+      console.error('Upload Error:', error);
+      alert(`Scholarly Upload Failed: ${error.message}`);
     } finally {
       setIsUploading(false);
-      if (e.target) e.target.value = ''; // Reset input
+      if (e.target) e.target.value = '';
     }
   };
-
-  // Real-time Folders
-  useEffect(() => {
-    if (!userId) return;
-    const q = query(
-      collection(db, `users/${userId}/folders`),
-      orderBy('createdAt', 'asc')
-    );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setFolders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as VaultFolder)));
-      setIsLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, `users/${userId}/folders`);
-    });
-    return () => unsubscribe();
-  }, [userId]);
-
-  // Real-time Items (Notes & Resources)
-  useEffect(() => {
-    if (!userId) return;
-    const q = query(
-      collection(db, `users/${userId}/notes`),
-      orderBy('createdAt', 'desc')
-    );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setItems(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as VaultItem)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, `users/${userId}/notes`);
-    });
-    return () => unsubscribe();
-  }, [userId]);
 
   const handleCreateFolder = async () => {
     if (!newFolderName || !userId) return;
     try {
-      await addDoc(collection(db, `users/${userId}/folders`), {
+      await supabase.from('vault_folders').insert({
         name: newFolderName,
-        userId,
-        parentId: newFolderParentId,
-        createdAt: serverTimestamp()
+        user_id: userId,
+        parent_id: newFolderParentId,
+        created_at: new Date().toISOString()
       });
       setIsAddingFolder(false);
       setNewFolderName('');
       setNewFolderParentId(null);
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, `users/${userId}/folders`);
+      console.error("Error creating folder:", error);
     }
   };
 
   const handleRenameFolder = async () => {
     if (!renamingFolder || !renamingFolder.name || !userId) return;
     try {
-      await updateDoc(doc(db, `users/${userId}/folders`, renamingFolder.id), {
-        name: renamingFolder.name
-      });
+      await supabase.from('vault_folders')
+        .update({ name: renamingFolder.name })
+        .eq('id', renamingFolder.id);
       setRenamingFolder(null);
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `users/${userId}/folders`);
+      console.error("Error renaming folder:", error);
     }
   };
 
   const handleAddItem = async () => {
     if (!newItem.title || !userId) return;
+    setIsLoading(true);
     try {
-      await addDoc(collection(db, `users/${userId}/notes`), {
-        ...newItem,
-        userId,
-        folderId: currentFolderId,
-        createdAt: serverTimestamp()
-      });
+      if (newItem.type === 'link' && newItem.url) {
+        // Use backend analysis and archival for links
+        const response = await fetch('/api/news/archive', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url: newItem.url,
+            title: newItem.title,
+            userId: userId,
+            content: newItem.content
+          })
+        });
+
+        if (!response.ok) {
+          const errData = await response.json();
+          throw new Error(errData.error || "Failed to analyze and archive.");
+        }
+        
+        const data = await response.json();
+        // The backend handles the insertion, real-time will update the list
+      } else {
+        // Direct insertion for notes and other local types
+        await supabase.from('vault_items').insert({
+          ...newItem,
+          user_id: userId,
+          folder_id: currentFolderId,
+          created_at: new Date().toISOString()
+        });
+      }
       setIsAddingItem(false);
       setNewItem({ title: '', type: 'link', url: '', content: '' });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, `users/${userId}/notes`);
+    } catch (error: any) {
+      console.error("Error adding item:", error);
+      alert(`Scholarly Addition Failed: ${error.message}`);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -211,66 +254,52 @@ export function PersonalVault({ user }: PersonalVaultProps) {
     if (!userId) return;
     try {
       if (type === 'item') {
-        await deleteDoc(doc(db, `users/${userId}/notes`, id));
+        await supabase.from('vault_items').delete().eq('id', id);
       } else {
-        // Recursive delete: find all subfolders and items
-        const deleteFolderRecursive = async (folderId: string) => {
-          // Delete items in this folder
-          const itemDocs = await getDocs(query(collection(db, `users/${userId}/notes`), where('folderId', '==', folderId)));
-          for (const d of itemDocs.docs) {
-            await deleteDoc(d.ref);
-          }
-          
-          // Delete subfolders
-          const subfolders = folders.filter(f => f.parentId === folderId);
-          for (const sub of subfolders) {
-            await deleteFolderRecursive(sub.id);
-          }
-          
-          // Delete the folder itself
-          await deleteDoc(doc(db, `users/${userId}/folders`, folderId));
-        };
-        await deleteFolderRecursive(id);
+        // Simple delete for now (cascading handled by DB usually, or recursive if needed)
+        await supabase.from('vault_folders').delete().eq('id', id);
       }
       setConfirmDelete(null);
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `users/${userId}/${type === 'item' ? 'notes' : 'folders'}`);
+      console.error("Error deleting:", error);
     }
   };
 
   const handleMoveToFolder = async (itemId: string, targetFolderId: string | null) => {
     if (!userId) return;
     try {
-      await updateDoc(doc(db, `users/${userId}/notes`, itemId), {
-        folderId: targetFolderId
-      });
+      await supabase.from('vault_items')
+        .update({ folder_id: targetFolderId })
+        .eq('id', itemId);
       setMovingItem(null);
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `users/${userId}/notes`);
+      console.error("Error moving item:", error);
     }
   };
 
   const handleSaveNote = async () => {
     if (!editingNote || !userId) return;
     try {
-      await updateDoc(doc(db, `users/${userId}/notes`, editingNote.id), {
-        content: editingNote.content,
-        title: editingNote.title
-      });
+      await supabase.from('vault_items')
+        .update({
+          content: editingNote.content,
+          title: editingNote.title
+        })
+        .eq('id', editingNote.id);
       setEditingNote(null);
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `users/${userId}/notes`);
+      console.error("Error saving note:", error);
     }
   };
 
   const filteredItems = items.filter(item => {
-    const matchesFolder = item.folderId === currentFolderId;
+    const matchesFolder = item.folder_id === currentFolderId;
     const matchesTab = activeTab === 'all' || item.type === activeTab;
     const matchesSearch = item.title.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesFolder && matchesTab && matchesSearch;
   });
 
-  const currentFolders = folders.filter(f => f.parentId === currentFolderId);
+  const currentFolders = folders.filter(f => f.parent_id === currentFolderId);
 
   const breadcrumbs = (() => {
     const crumbs: { id: string | null, name: string }[] = [{ id: null, name: 'Root Vault' }];
@@ -280,7 +309,7 @@ export function PersonalVault({ user }: PersonalVaultProps) {
     let curr = folderIdToObj(currentFolderId);
     while (curr) {
       path.unshift({ id: curr.id, name: curr.name });
-      curr = curr.parentId ? folderIdToObj(curr.parentId) : null;
+      curr = curr.parent_id ? folderIdToObj(curr.parent_id) : null;
     }
     return [...crumbs, ...path];
   })();
@@ -290,7 +319,7 @@ export function PersonalVault({ user }: PersonalVaultProps) {
   }
 
   const FolderTree = ({ parentId, level = 0 }: { parentId: string | null, level?: number }) => {
-    const childFolders = folders.filter(f => f.parentId === parentId);
+    const childFolders = folders.filter(f => f.parent_id === parentId);
     return (
       <div className="flex flex-col">
         {childFolders.map(folder => (
@@ -533,17 +562,17 @@ export function PersonalVault({ user }: PersonalVaultProps) {
         )}
       </AnimatePresence>
 
-      {/* Note Editor Modal */}
+      {/* Relocate Archive Modal */}
       <AnimatePresence>
         {movingItem && (
           <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-[#F5F2E7] p-8 rounded-[32px] border-4 border-[#8B4513] shadow-2xl max-w-sm w-full">
               <h3 className="text-xl font-serif font-bold text-[#8B4513] mb-6">Relocate Archive</h3>
-              <p className="text-sm font-serif italic text-leather/60 mb-6">Select candidate for the new repository of "{movingItem.title}"</p>
+              <p className="text-sm font-serif italic text-[#8B4513]/60 mb-6">Select candidate for the new repository of "{movingItem.title}"</p>
               <div className="space-y-2 mb-6 max-h-60 overflow-y-auto custom-scrollbar">
                 <button 
                   onClick={() => handleMoveToFolder(movingItem.id, null)}
-                  className={`w-full flex items-center gap-3 p-3 rounded-xl border border-[#8B4513]/10 hover:bg-white transition-all text-left ${movingItem.folderId === null ? 'bg-white border-[#D4AF37]' : ''}`}
+                  className={`w-full flex items-center gap-3 p-3 rounded-xl border border-[#8B4513]/10 hover:bg-white transition-all text-left ${movingItem.folder_id === null ? 'bg-white border-[#D4AF37]' : ''}`}
                 >
                   <FolderIcon size={16} className="text-[#D4AF37]" />
                   <span className="text-sm font-serif">Root Vault</span>
@@ -552,7 +581,7 @@ export function PersonalVault({ user }: PersonalVaultProps) {
                   <button 
                     key={f.id}
                     onClick={() => handleMoveToFolder(movingItem.id, f.id)}
-                    className={`w-full flex items-center gap-3 p-3 rounded-xl border border-[#8B4513]/10 hover:bg-white transition-all text-left ${movingItem.folderId === f.id ? 'bg-white border-[#D4AF37]' : ''}`}
+                    className={`w-full flex items-center gap-3 p-3 rounded-xl border border-[#8B4513]/10 hover:bg-white transition-all text-left ${movingItem.folder_id === f.id ? 'bg-white border-[#D4AF37]' : ''}`}
                   >
                     <FolderIcon size={16} className="text-[#D4AF37]" />
                     <span className="text-sm font-serif">{f.name}</span>
@@ -586,9 +615,49 @@ export function PersonalVault({ user }: PersonalVaultProps) {
                 </div>
                 <div className="flex-1 p-10 bg-white/30 overflow-y-auto custom-scrollbar">
                   <p className="text-[10px] font-bold text-[#8B4513]/40 uppercase tracking-widest mb-4">Illuminated Preview</p>
-                  <div className="prose prose-saddle max-w-none font-serif text-[#1A1612]">
+                  <div className="prose prose-saddle max-w-none font-serif text-[#1A1612] mb-10">
                     <ReactMarkdown>{editingNote.content || ''}</ReactMarkdown>
                   </div>
+
+                  {editingNote.analysis && (
+                    <div className="mt-8 pt-8 border-t border-[#8B4513]/10 space-y-8">
+                      <div className="bg-[#8B4513]/5 p-6 rounded-3xl border border-[#8B4513]/10">
+                        <h4 className="text-sm font-bold text-[#8B4513] uppercase tracking-widest mb-4 flex items-center gap-2">
+                          <Sparkles size={16} /> Strategic AI Analysis
+                        </h4>
+                        
+                        <div className="space-y-6">
+                          <div>
+                            <p className="text-[10px] font-bold text-[#8B4513]/60 uppercase mb-2">GS Paper Relevance</p>
+                            <span className="px-3 py-1 bg-[#8B4513] text-white text-[10px] font-bold rounded-lg uppercase">{editingNote.analysis.gs_paper}</span>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-6">
+                            <div className="space-y-3">
+                              <p className="text-[10px] font-bold text-[#8B4513]/60 uppercase flex items-center gap-2">
+                                <Zap size={12} className="text-[#D4AF37]" /> Prelims Facts
+                              </p>
+                              <ul className="space-y-2">
+                                {editingNote.analysis.prelims_facts?.map((f, i) => (
+                                  <li key={i} className="text-xs italic border-l-2 border-[#D4AF37]/30 pl-3 leading-relaxed">{f}</li>
+                                ))}
+                              </ul>
+                            </div>
+                            <div className="space-y-3">
+                              <p className="text-[10px] font-bold text-[#8B4513]/60 uppercase flex items-center gap-2">
+                                <BookOpen size={12} className="text-[#8B4513]" /> Mains Dimensions
+                              </p>
+                              <ul className="space-y-2">
+                                {editingNote.analysis.mains_dimensions?.map((d, i) => (
+                                  <li key={i} className="text-xs italic border-l-2 border-[#8B4513]/20 pl-3 leading-relaxed">{d}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </motion.div>

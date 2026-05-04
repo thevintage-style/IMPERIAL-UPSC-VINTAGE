@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { auth, onSnapshot, doc, db, googleProvider, signInWithPopup, signOut as firebaseSignOut, getDoc, setDoc, OperationType, handleFirestoreError } from './lib/firebase';
-import { supabase, signInWithEmail, signUpWithEmail, isConfigured as isSupabaseConfigured, configurationError } from './lib/supabase';
-import { User as FirebaseUser } from 'firebase/auth';
+import { supabase, signInWithEmail, signUpWithEmail, signInWithGoogle, isConfigured as isSupabaseConfigured, configurationError, signOut } from './lib/supabase';
 import { User as SupabaseUser } from '@supabase/supabase-js';
 import { Layout } from './components/Layout';
 import { Dashboard } from './components/Dashboard';
@@ -18,7 +16,6 @@ import { Profile } from './components/Profile';
 import { VizierStudio } from './components/VizierStudio';
 import { Community } from './components/Community';
 import { PeerChat } from './components/PeerChat';
-import { SocialSidebar } from './components/SocialSidebar';
 import { RulesAndRegulations } from './components/RulesAndRegulations';
 import { VedicDashboard } from './components/VedicDashboard';
 import { PersonalVault } from './components/PersonalVault';
@@ -26,19 +23,19 @@ import { VizierControl } from './components/VizierControl';
 import { Button } from './components/ui/button';
 import { LogIn, BookOpen } from 'lucide-react';
 
+import { UserProfile } from './types';
+
 export default function App() {
-  const [user, setUser] = useState<FirebaseUser | SupabaseUser | null>(null);
+  const [user, setUser] = useState<SupabaseUser | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [otpStep, setOtpStep] = useState(false);
-  const [otp, setOtp] = useState('');
-  const [tempUser, setTempUser] = useState<FirebaseUser | SupabaseUser | null>(null);
   const [loginLoading, setLoginLoading] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
 
-  const isAdmin = (user as any)?.email === "raksha05jk.rao@gmail.com";
+  const isAdmin = user?.email === "raksha05jk.rao@gmail.com";
 
   useEffect(() => {
     // Safety timeout: Ensure loading screen clears even if auth listeners hang
@@ -46,116 +43,88 @@ export default function App() {
       setLoading(false);
     }, 5000);
 
-    let supabaseSub: any = null;
-    let firebaseUnsubscribe: (() => void) | null = null;
-
-    const setupFirebaseListener = () => {
-      if (firebaseUnsubscribe) return;
-      firebaseUnsubscribe = auth.onAuthStateChanged(async (u) => {
-        if (u) {
-          const uid = u.uid;
-          try {
-            // Sync Firebase user to Firestore client-side
-            const { doc, setDoc } = await import('firebase/firestore');
-            const userRef = doc(db, 'users', uid);
-            const publicRef = doc(db, 'publicProfiles', uid);
-            const userData = {
-              uid,
-              displayName: u.displayName,
-              email: u.email,
-              role: u.email === "raksha05jk.rao@gmail.com" ? 'admin' : 'user',
-              subscriptionStatus: 'free',
-              lastLoginAt: new Date().toISOString()
-            };
-            await setDoc(userRef, userData, { merge: true });
-            await setDoc(publicRef, {
-              uid,
-              displayName: u.displayName,
-              photoURL: u.photoURL,
-              role: userData.role,
-              lastLoginAt: userData.lastLoginAt
-            }, { merge: true });
-            console.log("Firebase Profile Sync: Success");
-          } catch (error) {
-            console.error("Firebase Sync Error:", error);
-          }
-        }
-        if (!otpStep) {
-          setUser(u);
-        }
-        setLoading(false);
-      });
-    };
-
     if (isSupabaseConfigured) {
       const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (session?.user) {
-          const sUser = session.user;
+          setUser(session.user);
           
-          // Hybrid Auth: Get Firebase custom token for the Supabase user
+          // Sync and Fetch user profile
           try {
-            const tokenRes = await fetch('/api/auth/firebase-token', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                uid: sUser.id,
-                email: sUser.email,
-                displayName: sUser.user_metadata?.full_name || sUser.email?.split('@')[0]
-              })
-            });
+            const sUser = session.user;
             
-            if (tokenRes.ok) {
-              const { token } = await tokenRes.json();
-              const { signInWithCustomToken } = await import('firebase/auth');
-              const { doc, setDoc } = await import('firebase/firestore');
-              await signInWithCustomToken(auth, token);
-              console.log("Hybrid Auth: Firebase session established for Supabase user");
+            // 1. Fetch current profile
+            const { data: existingProfile, error: fetchError } = await supabase
+              .from('user_profiles')
+              .select('*')
+              .eq('id', sUser.id)
+              .single();
 
-              // Sync user to Firestore
-              try {
-                const userRef = doc(db, 'users', sUser.id);
-                const publicRef = doc(db, 'publicProfiles', sUser.id);
-                const userData = {
-                  uid: sUser.id,
-                  displayName: sUser.user_metadata?.full_name || sUser.email?.split('@')[0],
+            let currentProfile = existingProfile;
+
+            // 2. Upsert/Create if missing or needs update
+            if (!existingProfile || fetchError) {
+              const { data: newProfile, error: upsertError } = await supabase
+                .from('user_profiles')
+                .upsert({
+                  id: sUser.id,
                   email: sUser.email,
-                  role: sUser.email === "raksha05jk.rao@gmail.com" ? 'admin' : 'user',
-                  subscriptionStatus: 'free',
-                  lastLoginAt: new Date().toISOString()
-                };
-                await setDoc(userRef, userData, { merge: true });
-                await setDoc(publicRef, {
-                  uid: sUser.id,
-                  displayName: userData.displayName,
-                  role: userData.role,
-                  lastLoginAt: userData.lastLoginAt
-                }, { merge: true });
-                console.log("Client-side Profile Sync: Success");
-              } catch (syncError) {
-                console.error("Client-side Profile Sync Error:", syncError);
-              }
+                  full_name: sUser.user_metadata?.full_name || sUser.email?.split('@')[0],
+                  plan_type: 'Free',
+                  updated_at: new Date().toISOString()
+                }, { onConflict: 'id' })
+                .select()
+                .single();
+              
+              if (!upsertError) currentProfile = newProfile;
             }
-          } catch (error) {
-            console.error("Hybrid Auth Error:", error);
-          } finally {
-            setUser(sUser);
-            setLoading(false);
+
+            // 3. Subscription Check logic
+            if (currentProfile) {
+              const expiresAt = currentProfile.subscription_expires_at;
+              // Check if the plan is still valid as requested by user
+              const isImperialValid = currentProfile.plan_type === 'Imperial' && 
+                                     expiresAt && new Date(expiresAt) > new Date();
+                                     
+              if (expiresAt && new Date(expiresAt) < new Date() && currentProfile.plan_type !== 'Free') {
+                // Subscription has expired
+                const { data: updatedProfile } = await supabase
+                  .from('user_profiles')
+                  .update({ plan_type: 'Expired' })
+                  .eq('id', sUser.id)
+                  .select()
+                  .single();
+                
+                if (updatedProfile) currentProfile = updatedProfile;
+              }
+              setProfile(currentProfile);
+            }
+          } catch (err) {
+            console.error("Profile Management Error:", err);
           }
         } else {
-          setupFirebaseListener();
+          setUser(null);
+          setProfile(null);
         }
+        setLoading(false);
       });
-      supabaseSub = data.subscription;
-    } else {
-      setupFirebaseListener();
-    }
 
-    return () => {
-      clearTimeout(timeout);
-      if (supabaseSub) supabaseSub.unsubscribe();
-      if (firebaseUnsubscribe) firebaseUnsubscribe();
-    };
-  }, [otpStep]);
+      // Check initial session
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session) {
+          setUser(session.user);
+        }
+        setLoading(false);
+      });
+
+      return () => {
+        clearTimeout(timeout);
+        data.subscription.unsubscribe();
+      };
+    } else {
+      setLoading(false);
+      return () => clearTimeout(timeout);
+    }
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -165,32 +134,31 @@ export default function App() {
       return;
     }
     setLoginLoading(true);
-    console.log(`[Imperial Hub] Initiating ${isSignUp ? 'Registration' : 'Reconnaissance'} for ${email}...`);
     try {
       if (isSignUp) {
-        const result = await signUpWithEmail(email, password);
-        if (result?.user && !result.session) {
+        const data = await signUpWithEmail(email, password);
+        if (data?.user && !data.session) {
           alert("Registration initiated! A sacred raven (confirmation email) has been dispatched. Please verify your identity before signing in.");
-        } else if (result?.session) {
+        } else if (data?.session) {
           alert("Welcome, Imperial Scholar! Your account is active.");
         }
       } else {
         await signInWithEmail(email, password);
       }
     } catch (error: any) {
-      console.error("[Imperial Auth Failed]:", error.message);
+      console.warn("Authentication failed:", error.message);
       alert(error.message || "An arcane error occurred during identity verification.");
     } finally {
       setLoginLoading(false);
     }
   };
 
-  const verifyOtp = () => {
-    if (otp === '123456') { // Simulated OTP for demo
-      setUser(tempUser);
-      setOtpStep(false);
-    } else {
-      alert("Invalid verification code. The Imperial guard denies entry.");
+  const handleGoogleLogin = async () => {
+    try {
+      await signInWithGoogle();
+    } catch (error: any) {
+      console.error("[Imperial Auth Failed - Google]:", error.message);
+      alert("The Imperial Gates failed to open via Google. Please try again.");
     }
   };
 
@@ -212,7 +180,7 @@ export default function App() {
     );
   }
 
-  if (!user && !otpStep) {
+  if (!user) {
     return (
       <div className="min-h-screen bg-[#f5f2ed] flex items-center justify-center p-4 relative">
         {configurationError && (
@@ -262,6 +230,22 @@ export default function App() {
             </Button>
           </form>
 
+          <div className="mt-4 flex items-center gap-4">
+            <div className="flex-1 h-[1px] bg-[#5A5A40]/10"></div>
+            <span className="text-[10px] font-bold text-[#5A5A40]/40 uppercase tracking-widest">or use Google</span>
+            <div className="flex-1 h-[1px] bg-[#5A5A40]/10"></div>
+          </div>
+
+          <Button 
+            onClick={handleGoogleLogin}
+            type="button"
+            variant="outline"
+            className="w-full mt-4 border-[#5A5A40]/20 hover:bg-[#f5f2ed] rounded-full py-6 text-sm font-medium transition-all"
+          >
+            <img src="https://www.google.com/favicon.ico" alt="Google" className="w-4 h-4 mr-2" />
+            Continue with Google
+          </Button>
+
           <div className="mt-6">
             <button 
               onClick={() => setIsSignUp(!isSignUp)}
@@ -277,44 +261,19 @@ export default function App() {
     );
   }
 
-  if (otpStep) {
-    return (
-      <div className="min-h-screen bg-[#f5f2ed] flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-white p-12 rounded-[40px] shadow-2xl border border-[#5A5A40]/10 text-center">
-          <h1 className="text-2xl font-serif font-bold text-[#1a1a1a] mb-2">Verification Required</h1>
-          <p className="text-[#5A5A40] font-serif italic mb-8">A code has been sent to your device.</p>
-          <input 
-            type="text"
-            placeholder="Enter 6-digit OTP"
-            value={otp}
-            onChange={(e) => setOtp(e.target.value)}
-            className="w-full bg-[#f5f2ed] border border-[#5A5A40]/10 rounded-2xl py-4 px-6 text-center text-2xl font-mono tracking-widest mb-8 outline-none focus:ring-2 focus:ring-[#5A5A40]"
-          />
-          <Button 
-            onClick={verifyOtp}
-            className="w-full bg-[#5A5A40] hover:bg-[#4A4A30] text-white py-8 rounded-2xl text-lg font-bold transition-all shadow-xl"
-          >
-            Verify Identity
-          </Button>
-          <p className="mt-4 text-xs text-[#5A5A40]/60 font-serif">Demo Code: 123456</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <Layout user={user as any} activeTab={activeTab} setActiveTab={setActiveTab}>
-      {activeTab === 'dashboard' && <VedicDashboard user={user as any} setActiveTab={setActiveTab} />}
+    <Layout user={user as any} activeTab={activeTab} setActiveTab={setActiveTab} profile={profile}>
+      {activeTab === 'dashboard' && <VedicDashboard user={user as any} profile={profile} setActiveTab={setActiveTab} />}
       {activeTab === 'syllabus' && <Syllabus user={user as any} />}
-      {activeTab === 'oracle' && <Oracle user={user as any} />}
+      {activeTab === 'oracle' && <Oracle user={user as any} profile={profile} />}
       {activeTab === 'cartographer' && <Cartographer user={user as any} />}
       {activeTab === 'folio' && <Folio user={user as any} />}
       {activeTab === 'news' && <NewsDesk user={user as any} />}
       {activeTab === 'resource-hub' && <IntegratedResourceHub user={user as any} isAdmin={isAdmin} />}
       {activeTab === 'vault' && <PersonalVault user={user as any} />}
-      {activeTab === 'subscription' && <Subscription user={user as any} />}
+      {activeTab === 'subscription' && <Subscription user={user as any} profile={profile} />}
       {activeTab === 'support' && <Support user={user as any} />}
-      {activeTab === 'profile' && <Profile user={user as any} />}
+      {activeTab === 'profile' && <Profile user={user as any} profile={profile} />}
       {activeTab === 'vizier-studio' && <VizierStudio user={user as any} />}
       {activeTab === 'vizier-control' && isAdmin && <VizierControl user={user as any} />}
       {activeTab === 'community' && <Community user={user as any} isAdmin={isAdmin} />}

@@ -1,7 +1,5 @@
 import React from 'react';
-import { User as FirebaseUser } from 'firebase/auth';
 import { User as SupabaseUser } from '@supabase/supabase-js';
-import { auth, signOut as firebaseSignOut } from '../lib/firebase';
 import { supabase, signOut as supabaseSignOut } from '../lib/supabase';
 import { 
   LayoutDashboard, 
@@ -27,45 +25,33 @@ import {
   Settings
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { SocialSidebar } from './SocialSidebar';
 import { OracleOS } from './OracleOS';
-import { db, collection, onSnapshot, query, where, doc } from '../lib/firebase';
 import { cn } from '../lib/utils';
 
+import { UserProfile } from '../types';
+
 interface LayoutProps {
-  user: FirebaseUser | SupabaseUser;
+  user: SupabaseUser;
+  profile: UserProfile | null;
   activeTab: string;
   setActiveTab: (tab: string) => void;
   children: React.ReactNode;
 }
 
-export function Layout({ user, activeTab, setActiveTab, children }: LayoutProps) {
+export function Layout({ user, profile, activeTab, setActiveTab, children }: LayoutProps) {
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(true);
   const [activeOffers, setActiveOffers] = React.useState<any[]>([]);
-  const [userProfile, setUserProfile] = React.useState<any>(null);
 
   React.useEffect(() => {
-    const uid = (user as any).uid || (user as any).id;
-    if (!uid) return;
-    const userRef = doc(db, 'users', uid);
-    const unsubscribe = onSnapshot(userRef, (doc) => {
-      if (doc.exists()) {
-        setUserProfile(doc.data());
-      }
-    }, (error) => {
-      console.error("User Profile Listener Error:", error);
-    });
-    return () => unsubscribe();
-  }, [(user as any).uid || (user as any).id]);
-
-  React.useEffect(() => {
-    const q = query(collection(db, 'discountOffers'), where('isActive', '==', true));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setActiveOffers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => {
-      console.error("Discount Offers Listener Error:", error);
-    });
-    return () => unsubscribe();
+    const fetchOffers = async () => {
+      const { data, error } = await supabase
+        .from('discount_offers')
+        .select('*')
+        .eq('is_active', true);
+      
+      if (data) setActiveOffers(data);
+    };
+    fetchOffers();
   }, []);
 
   const navItems = [
@@ -162,12 +148,12 @@ export function Layout({ user, activeTab, setActiveTab, children }: LayoutProps)
           >
             <div className="relative">
               <img 
-                src={(user as any).photoURL || (user as any).user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${(user as any).uid || (user as any).id}`} 
+                src={user.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`} 
                 alt="Profile" 
                 className="w-10 h-10 rounded-full border-2 border-leather/20 shadow-sm"
                 referrerPolicy="no-referrer"
               />
-              {userProfile?.avatarId && (
+              {profile?.rank && (
                 <div className="absolute -bottom-1 -right-1 bg-lime p-0.5 rounded-full shadow-sm border border-white">
                   <Star size={8} className="text-leather" />
                 </div>
@@ -175,20 +161,16 @@ export function Layout({ user, activeTab, setActiveTab, children }: LayoutProps)
             </div>
             {isSidebarOpen && (
               <div className="flex flex-col overflow-hidden text-left">
-                <span className="text-sm font-bold truncate text-leather">{userProfile?.displayName || (user as any).displayName || (user as any).user_metadata?.full_name}</span>
+                <span className="text-sm font-bold truncate text-leather">{profile?.full_name || user.user_metadata?.full_name}</span>
                 <span className="text-[10px] text-leather/60 truncate italic font-serif uppercase tracking-widest font-bold">
-                  {userProfile?.avatarId ? userProfile.avatarId.split('-')[0].toUpperCase() : 'Aspirant'}
+                  {profile?.plan_type ? profile.plan_type.toUpperCase() : 'Aspirant'}
                 </span>
               </div>
             )}
           </button>
           <button
             onClick={async () => {
-              if ((user as any).aud === 'authenticated') {
-                await supabaseSignOut();
-              } else {
-                await firebaseSignOut(auth);
-              }
+              await supabaseSignOut();
             }}
             className="w-full flex items-center gap-4 p-3 rounded-xl text-red-600 hover:bg-red-50 transition-colors"
           >
@@ -260,10 +242,6 @@ export function Layout({ user, activeTab, setActiveTab, children }: LayoutProps)
 
       <OracleOS user={user as any} />
       
-      <div className="fixed bottom-8 right-8 z-[100]">
-        <SocialSidebar />
-      </div>
-
       <style>{`
         .gold-leaf-text {
           background: linear-gradient(45deg, #D4AF37, #F9F295, #D4AF37, #B8860B, #D4AF37);

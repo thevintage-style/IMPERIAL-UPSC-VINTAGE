@@ -1,19 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { User } from 'firebase/auth';
-import { 
-  collection, 
-  query, 
-  orderBy, 
-  onSnapshot, 
-  addDoc, 
-  serverTimestamp, 
-  doc, 
-  deleteDoc,
-  where,
-  limit,
-  setDoc
-} from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { User as SupabaseUser } from '@supabase/supabase-js';
+import { supabase } from '../lib/supabase';
 import { 
   Book, 
   Library as LibraryIcon, 
@@ -38,11 +25,11 @@ interface LibraryResource {
   category: 'ncert' | 'standard';
   folder: string;
   url: string;
-  createdAt: any;
+  created_at: string;
 }
 
 interface LibraryProps {
-  user: User;
+  user: SupabaseUser;
   isAdmin: boolean;
 }
 
@@ -55,39 +42,58 @@ export function Library({ user, isAdmin }: LibraryProps) {
   const [newResource, setNewResource] = useState({ title: '', type: 'pdf' as const, url: '', folder: 'General' });
   const [searchQuery, setSearchQuery] = useState('');
 
+  const fetchResources = async () => {
+    const { data } = await supabase
+      .from('library_resources')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (data) setResources(data);
+  };
+
   useEffect(() => {
-    const q = query(collection(db, 'libraryResources'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setResources(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LibraryResource)));
-    });
-    return () => unsubscribe();
+    fetchResources();
+
+    const channel = supabase
+      .channel('library_resources_changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'library_resources' }, fetchResources)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   useEffect(() => {
-    if (!user?.uid) return;
-    const q = query(
-      collection(db, 'recentlyViewed'), 
-      where('userId', '==', user.uid),
-      orderBy('viewedAt', 'desc'),
-      limit(5)
-    );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const viewedIds = snapshot.docs.map(doc => doc.data().resourceId);
-      const viewedResources = viewedIds.map(id => resources.find(r => r.id === id)).filter(Boolean) as LibraryResource[];
-      setRecentlyViewed(viewedResources);
-    });
-    return () => unsubscribe();
-  }, [user?.uid, resources]);
+    if (!user?.id) return;
+
+    const fetchRecentlyViewed = async () => {
+      const { data } = await supabase
+        .from('recently_viewed')
+        .select('resource_id')
+        .eq('user_id', user.id)
+        .order('viewed_at', { ascending: false })
+        .limit(5);
+
+      if (data && resources.length > 0) {
+        const viewedIds = data.map(v => v.resource_id);
+        const viewedResources = viewedIds
+          .map(id => resources.find(r => r.id === id))
+          .filter((r): r is LibraryResource => !!r);
+        setRecentlyViewed(viewedResources);
+      }
+    };
+
+    fetchRecentlyViewed();
+  }, [user?.id, resources]);
 
   const recordView = async (resource: LibraryResource) => {
-    if (!user?.uid) return;
+    if (!user?.id) return;
     try {
-      const viewRef = doc(db, 'recentlyViewed', `${user.uid}_${resource.id}`);
-      await setDoc(viewRef, {
-        userId: user.uid,
-        resourceId: resource.id,
-        viewedAt: serverTimestamp()
-      });
+      await supabase.from('recently_viewed').upsert({
+        user_id: user.id,
+        resource_id: resource.id,
+        viewed_at: new Date().toISOString()
+      }, { onConflict: 'user_id,resource_id' });
     } catch (error) {
       console.error("Error recording view:", error);
     }
@@ -96,10 +102,10 @@ export function Library({ user, isAdmin }: LibraryProps) {
   const handleAddResource = async () => {
     if (!newResource.title || !newResource.url) return;
     try {
-      await addDoc(collection(db, 'libraryResources'), {
+      await supabase.from('library_resources').insert({
         ...newResource,
         category: activeCategory,
-        createdAt: serverTimestamp()
+        created_at: new Date().toISOString()
       });
       setIsAdding(false);
       setNewResource({ title: '', type: 'pdf', url: '', folder: 'General' });
@@ -112,7 +118,7 @@ export function Library({ user, isAdmin }: LibraryProps) {
     if (!isAdmin) return;
     if (confirm("Are you sure you want to remove this resource from the Imperial Library?")) {
       try {
-        await deleteDoc(doc(db, 'libraryResources', id));
+        await supabase.from('library_resources').delete().eq('id', id);
       } catch (error) {
         console.error("Error deleting resource:", error);
       }

@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { User } from 'firebase/auth';
-import { db, doc, getDoc, setDoc, serverTimestamp, collection, onSnapshot, query, orderBy, OperationType, handleFirestoreError, addDoc, deleteDoc, updateDoc, limit } from '../lib/firebase';
+import { User as SupabaseUser } from '@supabase/supabase-js';
+import { supabase } from '../lib/supabase';
 import { Shield, Save, CreditCard, IndianRupee, History, Check, X, Plus, Trash2, Settings, Package, Database, RefreshCw, Activity, Cpu, Users, TrendingUp, AlertCircle, Lock, Eye, BarChart3, Zap, MessageSquare, Send } from 'lucide-react';
 import { Button } from './ui/button';
 import { motion, AnimatePresence } from 'motion/react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 
 interface OwnerSettingsProps {
-  user: User;
+  user: SupabaseUser;
 }
 
 type AdminTab = 'payments' | 'plans' | 'system' | 'storage' | 'verifications' | 'resources' | 'intelligence' | 'crm' | 'security' | 'videos' | 'discounts' | 'support';
@@ -19,11 +19,11 @@ export function OwnerSettings({ user }: OwnerSettingsProps) {
   
   // Payments State
   const [upiIds, setUpiIds] = useState<any[]>([]);
-  const [newUpi, setNewUpi] = useState({ upiId: '', label: '' });
+  const [newUpi, setNewUpi] = useState({ upi_id: '', label: '' });
   
   // Plans State
   const [plans, setPlans] = useState<any[]>([]);
-  const [newPlan, setNewPlan] = useState({ name: '', duration: '', price: 0, paymentLink: '', features: [''], isActive: true, highlight: false });
+  const [newPlan, setNewPlan] = useState({ name: '', duration: '', price: 0, instamojo_url: '', features: [''], is_active: true, highlight: false });
   
   // Resources State
   const [resources, setResources] = useState<any[]>([]);
@@ -32,12 +32,12 @@ export function OwnerSettings({ user }: OwnerSettingsProps) {
   // Videos & Playlists State
   const [videos, setVideos] = useState<any[]>([]);
   const [playlists, setPlaylists] = useState<any[]>([]);
-  const [newVideo, setNewVideo] = useState({ title: '', url: '', type: 'youtube', playlistId: '', description: '' });
+  const [newVideo, setNewVideo] = useState({ title: '', url: '', type: 'youtube', playlist_id: '', description: '' });
   const [newPlaylist, setNewPlaylist] = useState({ title: '', description: '', type: 'video' });
 
   // Discounts State
   const [discountOffers, setDiscountOffers] = useState<any[]>([]);
-  const [newDiscount, setNewDiscount] = useState({ code: '', description: '', discountPercentage: 0, expiryDate: '', isActive: true });
+  const [newDiscount, setNewDiscount] = useState({ code: '', description: '', discount_percentage: 0, expiry_date: '', is_active: true });
 
   // System State
   const [appConfig, setAppConfig] = useState<any>({});
@@ -59,160 +59,124 @@ export function OwnerSettings({ user }: OwnerSettingsProps) {
   const [engagementStats, setEngagementStats] = useState<any[]>([]);
 
   useEffect(() => {
-    // ... existing fetches ...
-    // Fetch App Config
-    const configPath = 'settings/appConfig';
-    const unsubscribeConfig = onSnapshot(doc(db, configPath), (doc) => {
-      if (doc.exists()) setAppConfig(doc.data());
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, configPath);
-    });
+    if (!user?.id) return;
 
-    // Fetch UPI IDs
-    const upiPath = 'upiIds';
-    const unsubscribeUpi = onSnapshot(collection(db, upiPath), (snapshot) => {
-      setUpiIds(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, upiPath);
-    });
+    // Fetch All Data
+    const fetchData = async () => {
+      // Fetch App Config
+      const { data: configData } = await supabase.from('app_config').select('*').single();
+      if (configData) setAppConfig(configData);
 
-    // Fetch Plans
-    const plansPath = 'plans';
-    const unsubscribePlans = onSnapshot(collection(db, plansPath), (snapshot) => {
-      setPlans(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, plansPath);
-    });
+      // Fetch UPI IDs
+      const { data: upiData } = await supabase.from('upi_ids').select('*');
+      if (upiData) setUpiIds(upiData);
 
-    // Fetch Transactions
-    const txPath = 'transactions';
-    const qTx = query(collection(db, txPath), orderBy('createdAt', 'desc'));
-    const unsubscribeTx = onSnapshot(qTx, (snapshot) => {
-      setTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, txPath);
-    });
+      // Fetch Plans
+      const { data: plansData } = await supabase.from('plans').select('*');
+      if (plansData) setPlans(plansData);
 
-    // Fetch Resources
-    const resourcesPath = 'resources';
-    const unsubscribeResources = onSnapshot(collection(db, resourcesPath), (snapshot) => {
-      setResources(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, resourcesPath);
-    });
+      // Fetch Transactions
+      const { data: txData } = await supabase.from('transactions').select('*').order('created_at', { ascending: false });
+      if (txData) setTransactions(txData);
 
-    // Fetch Videos
-    const videosPath = 'videos';
-    const unsubscribeVideos = onSnapshot(collection(db, videosPath), (snapshot) => {
-      setVideos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, videosPath);
-    });
+      // Fetch Resources
+      const { data: resData } = await supabase.from('resources').select('*');
+      if (resData) setResources(resData);
 
-    // Fetch Playlists
-    const playlistsPath = 'playlists';
-    const unsubscribePlaylists = onSnapshot(collection(db, playlistsPath), (snapshot) => {
-      setPlaylists(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, playlistsPath);
-    });
+      // Fetch Videos
+      const { data: vidData } = await supabase.from('videos').select('*');
+      if (vidData) setVideos(vidData);
 
-    // Fetch Discounts
-    const discountsPath = 'discountOffers';
-    const unsubscribeDiscounts = onSnapshot(collection(db, discountsPath), (snapshot) => {
-      setDiscountOffers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, discountsPath);
-    });
+      // Fetch Playlists
+      const { data: playData } = await supabase.from('playlists').select('*');
+      if (playData) setPlaylists(playData);
 
-    // Fetch Users
-    const usersPath = 'users';
-    const unsubscribeUsers = onSnapshot(collection(db, usersPath), (snapshot) => {
-      setAllUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, usersPath);
-    });
+      // Fetch Discounts
+      const { data: discData } = await supabase.from('discount_offers').select('*');
+      if (discData) setDiscountOffers(discData);
 
-    // Fetch Audit Logs
-    const auditPath = 'auditLogs';
-    const qAudit = query(collection(db, auditPath), orderBy('timestamp', 'desc'), limit(50));
-    const unsubscribeAudit = onSnapshot(qAudit, (snapshot) => {
-      setAuditLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, auditPath);
-    });
+      // Fetch Users
+      const { data: usersData } = await supabase.from('public_profiles').select('*');
+      if (usersData) setAllUsers(usersData);
 
-    // Fetch Engagement Stats
-    const statsPath = 'engagementStats';
-    const qStats = query(collection(db, statsPath), orderBy('date', 'desc'), limit(30));
-    const unsubscribeStats = onSnapshot(qStats, (snapshot) => {
-      setEngagementStats(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, statsPath);
-    });
+      // Fetch Audit Logs
+      const { data: auditData } = await supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(50);
+      if (auditData) setAuditLogs(auditData);
 
-    // Fetch Support Chats
-    const chatsPath = 'supportChats';
-    const qChats = query(collection(db, chatsPath), orderBy('lastMessageAt', 'desc'));
-    const unsubscribeChats = onSnapshot(qChats, (snapshot) => {
-      setSupportChats(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, chatsPath);
-    });
+      // Fetch Support Chats
+      const { data: chatsData } = await supabase.from('support_chats').select('*').order('last_message_at', { ascending: false });
+      if (chatsData) setSupportChats(chatsData);
+    };
+
+    fetchData();
+
+    // Set up real-time subscriptions for critical ones
+    const txChannel = supabase.channel('tx_verifications').on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, fetchData).subscribe();
+    const configChannel = supabase.channel('config_updates').on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'app_config' }, fetchData).subscribe();
 
     return () => {
-      unsubscribeConfig();
-      unsubscribeUpi();
-      unsubscribePlans();
-      unsubscribeTx();
-      unsubscribeResources();
-      unsubscribeVideos();
-      unsubscribePlaylists();
-      unsubscribeDiscounts();
-      unsubscribeUsers();
-      unsubscribeAudit();
-      unsubscribeStats();
-      unsubscribeChats();
+      supabase.removeChannel(txChannel);
+      supabase.removeChannel(configChannel);
     };
-  }, []);
+  }, [user.id]);
 
   useEffect(() => {
     if (!activeChat) return;
-    const messagesPath = `supportChats/${activeChat.id}/messages`;
-    const qMsg = query(collection(db, messagesPath), orderBy('createdAt', 'asc'));
-    const unsubscribeMsg = onSnapshot(qMsg, (snapshot) => {
-      setChatMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
-    return () => unsubscribeMsg();
+    
+    const fetchChatMessages = async () => {
+      const { data } = await supabase
+        .from('support_chat_messages')
+        .select('*')
+        .eq('chat_id', activeChat.id)
+        .order('created_at', { ascending: true });
+      if (data) setChatMessages(data);
+    };
+
+    fetchChatMessages();
+
+    const msgChannel = supabase
+      .channel(`chat_msg_${activeChat.id}`)
+      .on('postgres_changes', { 
+        event: 'INSERT', 
+        schema: 'public', 
+        table: 'support_chat_messages',
+        filter: `chat_id=eq.${activeChat.id}`
+      }, (payload) => {
+        setChatMessages(prev => [...prev, payload.new]);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(msgChannel);
+    };
   }, [activeChat]);
 
   const sendAdminReply = async () => {
     if (!adminReply.trim() || !activeChat) return;
-    const messagesPath = `supportChats/${activeChat.id}/messages`;
     try {
-      await addDoc(collection(db, messagesPath), {
-        chatId: activeChat.id,
-        senderId: user.uid,
-        senderRole: 'admin',
+      await supabase.from('support_chat_messages').insert({
+        chat_id: activeChat.id,
+        sender_id: user.id,
+        sender_role: 'admin',
         text: adminReply,
-        createdAt: serverTimestamp()
+        created_at: new Date().toISOString()
       });
-      await updateDoc(doc(db, 'supportChats', activeChat.id), {
-        lastMessageAt: serverTimestamp()
-      });
+      await supabase.from('support_chats').update({
+        last_message_at: new Date().toISOString()
+      }).eq('id', activeChat.id);
       setAdminReply('');
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, messagesPath);
+      console.error("Error sending admin reply:", error);
     }
   };
 
   const logAction = async (action: string, details: string) => {
     try {
-      await addDoc(collection(db, 'auditLogs'), {
-        adminId: user.uid,
+      await supabase.from('audit_logs').insert({
+        admin_id: user.id,
         action,
         details,
-        timestamp: new Date().toISOString()
+        created_at: new Date().toISOString()
       });
     } catch (error) {
       console.error("Failed to log audit action", error);
@@ -222,60 +186,62 @@ export function OwnerSettings({ user }: OwnerSettingsProps) {
   const handleAddResource = async () => {
     if (!newResource.title || !newResource.url) return;
     try {
-      await addDoc(collection(db, 'resources'), {
+      await supabase.from('resources').insert({
         ...newResource,
-        createdAt: serverTimestamp()
+        created_at: new Date().toISOString()
       });
       setNewResource({ title: '', category: 'prelims', type: 'pdf', url: '', description: '' });
+      logAction('RESOURCE_ADDED', `New resource added: ${newResource.title}`);
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'resources');
+      console.error("Error adding resource:", error);
     }
   };
 
   const deleteResource = async (id: string) => {
     try {
-      await deleteDoc(doc(db, 'resources', id));
+      await supabase.from('resources').delete().eq('id', id);
+      logAction('RESOURCE_DELETED', `Resource deleted: ${id}`);
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `resources/${id}`);
+      console.error("Error deleting resource:", error);
     }
   };
 
   const handleAddUpi = async () => {
-    if (!newUpi.upiId || !newUpi.label) return;
+    if (!newUpi.upi_id || !newUpi.label) return;
     try {
-      await addDoc(collection(db, 'upiIds'), {
+      await supabase.from('upi_ids').insert({
         ...newUpi,
-        isActive: true,
-        isPrimary: upiIds.length === 0,
-        usageCount: 0
+        is_active: true,
+        is_primary: upiIds.length === 0,
+        usage_count: 0,
+        created_at: new Date().toISOString()
       });
-      await logAction('UPI_ADDED', `New UPI ID added: ${newUpi.upiId} (${newUpi.label})`);
-      setNewUpi({ upiId: '', label: '' });
+      await logAction('UPI_ADDED', `New UPI ID added: ${newUpi.upi_id} (${newUpi.label})`);
+      setNewUpi({ upi_id: '', label: '' });
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'upiIds');
+      console.error("Error adding UPI:", error);
     }
   };
 
   const toggleUpiStatus = async (id: string, current: boolean) => {
     try {
-      await setDoc(doc(db, 'upiIds', id), { isActive: !current }, { merge: true });
+      await supabase.from('upi_ids').update({ is_active: !current }).eq('id', id);
       await logAction('UPI_STATUS_TOGGLED', `UPI ID ${id} status changed to ${!current ? 'Active' : 'Inactive'}`);
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `upiIds/${id}`);
+      console.error("Error toggling UPI status:", error);
     }
   };
 
   const setPrimaryUpi = async (id: string) => {
     try {
       const upi = upiIds.find(u => u.id === id);
-      const batch = upiIds.map(u => 
-        setDoc(doc(db, 'upiIds', u.id), { isPrimary: u.id === id }, { merge: true })
-      );
-      await Promise.all(batch);
-      await setDoc(doc(db, 'settings/appConfig'), { activeUpiId: upi?.upiId }, { merge: true });
-      await logAction('UPI_PRIMARY_SET', `Primary UPI ID set to ${upi?.upiId}`);
+      const { error } = await supabase.rpc('set_primary_upi', { upi_id_to_set: id });
+      if (error) throw error;
+      
+      await supabase.from('app_config').update({ active_upi_id: upi?.upi_id }).eq('id', appConfig.id);
+      await logAction('UPI_PRIMARY_SET', `Primary UPI ID set to ${upi?.upi_id}`);
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'upiIds');
+      console.error("Error setting primary UPI:", error);
     }
   };
 
@@ -284,21 +250,22 @@ export function OwnerSettings({ user }: OwnerSettingsProps) {
       const planData = {
         ...newPlan,
         features: newPlan.features.filter(f => f.trim() !== ''),
-        createdAt: serverTimestamp()
+        created_at: new Date().toISOString()
       };
-      await addDoc(collection(db, 'plans'), planData);
+      await supabase.from('plans').insert(planData);
       await logAction('PLAN_CREATED', `New subscription plan created: ${newPlan.name}`);
-      setNewPlan({ name: '', duration: '', price: 0, paymentLink: '', features: [''], isActive: true, highlight: false });
+      setNewPlan({ name: '', duration: '', price: 0, instamojo_url: '', features: [''], is_active: true, highlight: false });
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'plans');
+      console.error("Error adding plan:", error);
     }
   };
 
   const deletePlan = async (id: string) => {
     try {
-      await deleteDoc(doc(db, 'plans', id));
+      await supabase.from('plans').delete().eq('id', id);
+      logAction('PLAN_DELETED', `Plan deleted: ${id}`);
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `plans/${id}`);
+      console.error("Error deleting plan:", error);
     }
   };
 
@@ -326,84 +293,84 @@ export function OwnerSettings({ user }: OwnerSettingsProps) {
   };
 
   const verifyTransaction = async (txId: string, status: 'approved' | 'rejected', userId: string) => {
-    const txPath = `transactions/${txId}`;
-    const userPath = `users/${userId}`;
     try {
-      await setDoc(doc(db, txPath), { status }, { merge: true });
+      await supabase.from('transactions').update({ status }).eq('id', txId);
       if (status === 'approved') {
-        await setDoc(doc(db, userPath), {
-          subscriptionStatus: 'pro',
-          subscriptionExpiry: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
-        }, { merge: true });
+        const expiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+        await supabase.from('public_profiles').update({
+          subscription_status: 'pro',
+          subscription_expiry: expiry
+        }).eq('id', userId);
       }
+      logAction('TRANSACTION_VERIFIED', `Transaction ${txId} ${status} for user ${userId}`);
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, txPath);
+      console.error("Error verifying transaction:", error);
     }
   };
 
   const handleAddVideo = async () => {
     if (!newVideo.title || !newVideo.url) return;
     try {
-      await addDoc(collection(db, 'videos'), {
+      await supabase.from('videos').insert({
         ...newVideo,
-        createdAt: serverTimestamp()
+        created_at: new Date().toISOString()
       });
-      await logAction('VIDEO_ADDED', `New video added: ${newVideo.title} (${newVideo.type})`);
-      setNewVideo({ title: '', url: '', type: 'youtube', playlistId: '', description: '' });
+      await logAction('VIDEO_ADDED', `New video added: ${newVideo.title}`);
+      setNewVideo({ title: '', url: '', type: 'youtube', playlist_id: '', description: '' });
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'videos');
+      console.error("Error adding video:", error);
     }
   };
 
   const handleAddPlaylist = async () => {
     if (!newPlaylist.title) return;
     try {
-      await addDoc(collection(db, 'playlists'), {
+      await supabase.from('playlists').insert({
         ...newPlaylist,
-        createdAt: serverTimestamp()
+        created_at: new Date().toISOString()
       });
       await logAction('PLAYLIST_CREATED', `New playlist created: ${newPlaylist.title}`);
       setNewPlaylist({ title: '', description: '', type: 'video' });
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'playlists');
+      console.error("Error adding playlist:", error);
     }
   };
 
   const handleAddDiscount = async () => {
-    if (!newDiscount.code || !newDiscount.discountPercentage) return;
+    if (!newDiscount.code || !newDiscount.discount_percentage) return;
     try {
-      await addDoc(collection(db, 'discountOffers'), {
+      await supabase.from('discount_offers').insert({
         ...newDiscount,
-        createdAt: serverTimestamp()
+        created_at: new Date().toISOString()
       });
       await logAction('DISCOUNT_CREATED', `New discount offer created: ${newDiscount.code}`);
-      setNewDiscount({ code: '', description: '', discountPercentage: 0, expiryDate: '', isActive: true });
+      setNewDiscount({ code: '', description: '', discount_percentage: 0, expiry_date: '', is_active: true });
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'discountOffers');
+      console.error("Error adding discount:", error);
     }
   };
 
   const deleteVideo = async (id: string) => {
     try {
-      await deleteDoc(doc(db, 'videos', id));
+      await supabase.from('videos').delete().eq('id', id);
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `videos/${id}`);
+      console.error("Error deleting video:", error);
     }
   };
 
   const deletePlaylist = async (id: string) => {
     try {
-      await deleteDoc(doc(db, 'playlists', id));
+      await supabase.from('playlists').delete().eq('id', id);
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `playlists/${id}`);
+      console.error("Error deleting playlist:", error);
     }
   };
 
   const deleteDiscount = async (id: string) => {
     try {
-      await deleteDoc(doc(db, 'discountOffers', id));
+      await supabase.from('discount_offers').delete().eq('id', id);
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `discountOffers/${id}`);
+      console.error("Error deleting discount:", error);
     }
   };
 
@@ -558,39 +525,39 @@ export function OwnerSettings({ user }: OwnerSettingsProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {allUsers.map((u) => {
-                      const eng = getEngagementScore(u.lastLoginAt || u.createdAt);
-                      return (
-                        <tr key={u.id} className="border-b border-[#5A5A40]/5 hover:bg-[#f5f2ed]/30 transition-colors">
-                          <td className="py-4 px-4">
-                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 bg-[#5A5A40]/10 rounded-full flex items-center justify-center text-[#5A5A40] font-bold text-xs">
-                                {u.displayName?.[0] || 'S'}
+                      {allUsers.map((u) => {
+                        const eng = getEngagementScore(u.last_login_at || u.created_at);
+                        return (
+                          <tr key={u.id} className="border-b border-[#5A5A40]/5 hover:bg-[#f5f2ed]/30 transition-colors">
+                            <td className="py-4 px-4">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 bg-[#5A5A40]/10 rounded-full flex items-center justify-center text-[#5A5A40] font-bold text-xs">
+                                  {u.display_name?.[0] || 'S'}
+                                </div>
+                                <div>
+                                  <p className="font-serif font-bold text-sm">{u.display_name}</p>
+                                  <p className="text-[10px] text-[#5A5A40]/60">{u.email}</p>
+                                </div>
                               </div>
-                              <div>
-                                <p className="font-serif font-bold text-sm">{u.displayName}</p>
-                                <p className="text-[10px] text-[#5A5A40]/60">{u.email}</p>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="py-4 px-4">
-                            <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-full ${
-                              u.subscriptionStatus === 'pro' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'
-                            }`}>
-                              {u.subscriptionStatus}
-                            </span>
-                          </td>
-                          <td className="py-4 px-4">
-                            <div className="flex items-center gap-2">
-                              <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden w-16">
-                                <div className={`h-full ${eng.color.replace('text', 'bg')}`} style={{ width: `${eng.score}%` }} />
-                              </div>
-                              <span className={`text-xs font-bold ${eng.color}`}>{eng.score}%</span>
-                            </div>
-                          </td>
-                          <td className="py-4 px-4 text-xs text-[#5A5A40]/60 font-serif italic">
-                            {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleDateString() : 'Never'}
-                          </td>
+                            </td>
+                            <td className="py-4 px-4">
+                              <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-full ${
+                                u.subscription_status === 'pro' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'
+                              }`}>
+                                {u.subscription_status}
+                              </span>
+                            </td>
+                            <td className="py-4 px-4">
+                              <div className="flex items-center gap-2">
+                                <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden w-16">
+                                  <div className={`h-full ${eng.color.replace('text', 'bg')}`} style={{ width: `${eng.score}%` }} />
+                                </div>
+                                <span className={`text-xs font-bold ${eng.color}`}>{eng.score}%</span>
+                                </div>
+                            </td>
+                            <td className="py-4 px-4 text-xs text-[#5A5A40]/60 font-serif italic">
+                              {u.last_login_at ? new Date(u.last_login_at).toLocaleDateString() : 'Never'}
+                            </td>
                           <td className="py-4 px-4">
                             <div className="flex gap-2">
                               <button className="p-2 hover:bg-[#5A5A40]/10 rounded-lg text-[#5A5A40] transition-colors" title="Extend Subscription">
@@ -650,23 +617,23 @@ export function OwnerSettings({ user }: OwnerSettingsProps) {
                   <p className="text-center py-12 text-[#5A5A40]/40 font-serif italic">No pending transactions found in the scrolls.</p>
                 ) : (
                   transactions.map((tx) => (
-                    <div key={tx.id} className="flex flex-col md:flex-row items-center justify-between p-6 bg-[#f5f2ed] rounded-3xl border border-[#5A5A40]/10 gap-4">
+                  <div key={tx.id} className="flex flex-col md:flex-row items-center justify-between p-6 bg-[#f5f2ed] rounded-3xl border border-[#5A5A40]/10 gap-4">
                       <div className="space-y-1">
-                        <p className="font-serif font-bold text-[#1a1a1a]">{tx.userName}</p>
-                        <p className="text-xs text-[#5A5A40]/60 font-mono">TXN: {tx.transactionId}</p>
-                        <p className="text-[10px] text-[#5A5A40]/40 uppercase tracking-widest">{new Date(tx.createdAt?.toDate?.() || tx.createdAt).toLocaleString()}</p>
+                        <p className="font-serif font-bold text-[#1a1a1a]">{tx.user_name}</p>
+                        <p className="text-xs text-[#5A5A40]/60 font-mono">TXN: {tx.transaction_id}</p>
+                        <p className="text-[10px] text-[#5A5A40]/40 uppercase tracking-widest">{new Date(tx.created_at).toLocaleString()}</p>
                       </div>
                       <div className="flex items-center gap-3">
                         {tx.status === 'pending' ? (
                           <>
                             <button 
-                              onClick={() => verifyTransaction(tx.id, 'approved', tx.userId)}
+                              onClick={() => verifyTransaction(tx.id, 'approved', tx.user_id)}
                               className="p-3 bg-green-100 text-green-700 rounded-xl hover:bg-green-200 transition-colors"
                             >
                               <Check size={20} />
                             </button>
                             <button 
-                              onClick={() => verifyTransaction(tx.id, 'rejected', tx.userId)}
+                              onClick={() => verifyTransaction(tx.id, 'rejected', tx.user_id)}
                               className="p-3 bg-red-100 text-red-700 rounded-xl hover:bg-red-200 transition-colors"
                             >
                               <X size={20} />
@@ -706,8 +673,8 @@ export function OwnerSettings({ user }: OwnerSettingsProps) {
                     <div className="flex gap-2">
                       <input 
                         type="text"
-                        value={newUpi.upiId}
-                        onChange={(e) => setNewUpi({...newUpi, upiId: e.target.value})}
+                        value={newUpi.upi_id}
+                        onChange={(e) => setNewUpi({...newUpi, upi_id: e.target.value})}
                         className="flex-1 bg-[#f5f2ed] border border-[#5A5A40]/10 rounded-xl py-3 px-4 font-serif outline-none"
                       />
                       <Button onClick={handleAddUpi} className="bg-[#5A5A40] text-white rounded-xl">
@@ -721,28 +688,28 @@ export function OwnerSettings({ user }: OwnerSettingsProps) {
                   {upiIds.map((upi) => (
                     <div key={upi.id} className="flex items-center justify-between p-6 bg-[#f5f2ed] rounded-3xl border border-[#5A5A40]/10">
                       <div className="flex items-center gap-4">
-                        <div className={`w-3 h-3 rounded-full ${upi.isActive ? 'bg-green-500' : 'bg-red-500'}`} />
+                        <div className={`w-3 h-3 rounded-full ${upi.is_active ? 'bg-green-500' : 'bg-red-500'}`} />
                         <div>
                           <p className="font-serif font-bold">{upi.label}</p>
-                          <p className="text-xs text-[#5A5A40]/60 font-mono">{upi.upiId}</p>
+                          <p className="text-xs text-[#5A5A40]/60 font-mono">{upi.upi_id}</p>
                         </div>
-                        {upi.isPrimary && (
+                        {upi.is_primary && (
                           <span className="bg-[#5A5A40] text-white text-[10px] px-2 py-0.5 rounded-full uppercase font-bold">Primary</span>
                         )}
                       </div>
                       <div className="flex items-center gap-2">
                         <Button 
                           onClick={() => setPrimaryUpi(upi.id)}
-                          disabled={upi.isPrimary}
+                          disabled={upi.is_primary}
                           className="text-xs bg-white text-[#5A5A40] border border-[#5A5A40]/10 rounded-lg px-3 py-1"
                         >
                           Make Primary
                         </Button>
                         <Button 
-                          onClick={() => toggleUpiStatus(upi.id, upi.isActive)}
-                          className={`text-xs rounded-lg px-3 py-1 ${upi.isActive ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}
+                          onClick={() => toggleUpiStatus(upi.id, upi.is_active)}
+                          className={`text-xs rounded-lg px-3 py-1 ${upi.is_active ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}
                         >
-                          {upi.isActive ? 'Deactivate' : 'Activate'}
+                          {upi.is_active ? 'Deactivate' : 'Activate'}
                         </Button>
                       </div>
                     </div>
@@ -777,9 +744,9 @@ export function OwnerSettings({ user }: OwnerSettingsProps) {
                     className="bg-[#f5f2ed] border border-[#5A5A40]/10 rounded-xl py-3 px-4 font-serif outline-none"
                   />
                   <input 
-                    placeholder="Payment Link (Instamojo/Razorpay)"
-                    value={newPlan.paymentLink}
-                    onChange={(e) => setNewPlan({...newPlan, paymentLink: e.target.value})}
+                    placeholder="Payment Link (Instamojo)"
+                    value={newPlan.instamojo_url}
+                    onChange={(e) => setNewPlan({...newPlan, instamojo_url: e.target.value})}
                     className="bg-[#f5f2ed] border border-[#5A5A40]/10 rounded-xl py-3 px-4 font-serif outline-none col-span-1 lg:col-span-3 mt-2"
                   />
                 </div>
@@ -841,7 +808,7 @@ export function OwnerSettings({ user }: OwnerSettingsProps) {
                     </ul>
                     <div className="flex items-center gap-2">
                       {plan.highlight && <span className="bg-[#5A5A40] text-white text-[10px] px-2 py-1 rounded-full uppercase font-bold">Highlighted</span>}
-                      {plan.isActive && <span className="bg-green-100 text-green-700 text-[10px] px-2 py-1 rounded-full uppercase font-bold">Active</span>}
+                      {plan.is_active && <span className="bg-green-100 text-green-700 text-[10px] px-2 py-1 rounded-full uppercase font-bold">Active</span>}
                     </div>
                   </div>
                 ))}
@@ -863,14 +830,14 @@ export function OwnerSettings({ user }: OwnerSettingsProps) {
                   <input 
                     type="number"
                     placeholder="Discount %"
-                    value={newDiscount.discountPercentage}
-                    onChange={(e) => setNewDiscount({...newDiscount, discountPercentage: Number(e.target.value)})}
+                    value={newDiscount.discount_percentage}
+                    onChange={(e) => setNewDiscount({...newDiscount, discount_percentage: Number(e.target.value)})}
                     className="bg-[#f5f2ed] border border-[#5A5A40]/10 rounded-xl py-3 px-4 font-serif outline-none"
                   />
                   <input 
                     type="date"
-                    value={newDiscount.expiryDate}
-                    onChange={(e) => setNewDiscount({...newDiscount, expiryDate: e.target.value})}
+                    value={newDiscount.expiry_date}
+                    onChange={(e) => setNewDiscount({...newDiscount, expiry_date: e.target.value})}
                     className="bg-[#f5f2ed] border border-[#5A5A40]/10 rounded-xl py-3 px-4 font-serif outline-none"
                   />
                   <Button onClick={handleAddDiscount} className="bg-[#5A5A40] text-white rounded-xl py-3">
@@ -889,7 +856,7 @@ export function OwnerSettings({ user }: OwnerSettingsProps) {
                 {discountOffers.map((offer) => (
                   <div key={offer.id} className="bg-white p-8 rounded-[40px] border border-[#5A5A40]/10 shadow-sm relative group overflow-hidden">
                     <div className="absolute top-0 right-0 bg-[#5A5A40] text-white px-6 py-2 rounded-bl-3xl font-bold">
-                      {offer.discountPercentage}% OFF
+                      {offer.discount_percentage}% OFF
                     </div>
                     <button 
                       onClick={() => deleteDiscount(offer.id)}
@@ -900,8 +867,8 @@ export function OwnerSettings({ user }: OwnerSettingsProps) {
                     <h4 className="text-2xl font-serif font-bold mb-2">{offer.code}</h4>
                     <p className="text-sm text-[#5A5A40]/60 font-serif mb-4">{offer.description}</p>
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-[#5A5A40]/40">Expires: {new Date(offer.expiryDate).toLocaleDateString()}</span>
-                      {offer.isActive ? (
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-[#5A5A40]/40">Expires: {new Date(offer.expiry_date).toLocaleDateString()}</span>
+                      {offer.is_active ? (
                         <span className="bg-green-100 text-green-700 text-[10px] px-2 py-1 rounded-full uppercase font-bold">Live</span>
                       ) : (
                         <span className="bg-red-100 text-red-700 text-[10px] px-2 py-1 rounded-full uppercase font-bold">Inactive</span>
@@ -939,8 +906,8 @@ export function OwnerSettings({ user }: OwnerSettingsProps) {
                           <option value="podcast">Podcast</option>
                         </select>
                         <select 
-                          value={newVideo.playlistId}
-                          onChange={(e) => setNewVideo({...newVideo, playlistId: e.target.value})}
+                          value={newVideo.playlist_id}
+                          onChange={(e) => setNewVideo({...newVideo, playlist_id: e.target.value})}
                           className="bg-[#f5f2ed] border border-[#5A5A40]/10 rounded-xl py-3 px-4 font-serif outline-none"
                         >
                           <option value="">No Playlist</option>
@@ -1178,13 +1145,13 @@ export function OwnerSettings({ user }: OwnerSettingsProps) {
                   className={`w-full text-left p-4 rounded-2xl transition-all ${activeChat?.id === chat.id ? 'bg-[#5A5A40] text-white shadow-md' : 'hover:bg-[#f5f2ed] text-[#5A5A40]'}`}
                 >
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-bold truncate">{chat.userId.slice(0, 8)}...</span>
+                    <span className="text-xs font-bold truncate">{chat.user_id?.slice(0, 8)}...</span>
                     <span className={`text-[10px] ${activeChat?.id === chat.id ? 'text-white/60' : 'text-[#5A5A40]/40'}`}>
-                      {new Date(chat.lastMessageAt?.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      {new Date(chat.last_message_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
                   </div>
                   <p className={`text-[10px] truncate ${activeChat?.id === chat.id ? 'text-white/80' : 'text-[#5A5A40]/60'}`}>
-                    {chat.lastMessage || 'No messages yet'}
+                    {chat.last_message || 'No messages yet'}
                   </p>
                 </button>
               ))}
@@ -1201,15 +1168,15 @@ export function OwnerSettings({ user }: OwnerSettingsProps) {
                     </div>
                     <div>
                       <h4 className="text-sm font-serif font-bold">Chat with Scholar</h4>
-                      <p className="text-[10px] text-[#5A5A40]/40">{activeChat.userId}</p>
+                      <p className="text-[10px] text-[#5A5A40]/40">{activeChat.user_id}</p>
                     </div>
                   </div>
                 </div>
                 <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
                   {chatMessages.map(msg => (
-                    <div key={msg.id} className={`flex ${msg.senderRole === 'admin' ? 'justify-end' : 'justify-start'}`}>
+                    <div key={msg.id} className={`flex ${msg.sender_role === 'admin' ? 'justify-end' : 'justify-start'}`}>
                       <div className={`max-w-[80%] p-3 rounded-2xl text-xs ${
-                        msg.senderRole === 'admin' ? 'bg-[#5A5A40] text-white rounded-tr-none' : 'bg-[#f5f2ed] text-[#1a1a1a] rounded-tl-none border border-[#5A5A40]/10'
+                        msg.sender_role === 'admin' ? 'bg-[#5A5A40] text-white rounded-tr-none' : 'bg-[#f5f2ed] text-[#1a1a1a] rounded-tl-none border border-[#5A5A40]/10'
                       }`}>
                         {msg.text}
                       </div>

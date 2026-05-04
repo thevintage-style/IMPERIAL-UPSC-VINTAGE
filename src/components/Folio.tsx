@@ -1,22 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { User as FirebaseUser } from 'firebase/auth';
 import { User as SupabaseUser } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
-import { 
-  collection, 
-  query, 
-  orderBy, 
-  limit, 
-  onSnapshot, 
-  addDoc, 
-  updateDoc, 
-  doc, 
-  serverTimestamp, 
-  deleteDoc,
-  getDocs,
-  where
-} from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { CreativeSuite } from './CreativeSuite';
 import { 
   Book, 
@@ -53,17 +37,17 @@ const ai = new GoogleGenAI({ apiKey: process.env.VINTAGE_ORACLE_KEY || "" });
 
 interface LogEntry {
   id?: string;
-  userId: string;
+  user_id: string;
   title: string;
-  journalData: string;
-  sheetData: string;
-  canvasData: string;
-  aiSummary: string;
-  createdAt: any;
+  journal_data: string;
+  sheet_data: string;
+  canvas_data: string;
+  ai_summary: string;
+  created_at: any;
 }
 
 interface FolioProps {
-  user: FirebaseUser | SupabaseUser;
+  user: SupabaseUser;
 }
 
 export function Folio({ user }: FolioProps) {
@@ -89,28 +73,28 @@ export function Folio({ user }: FolioProps) {
   const canvasRef = useRef<SVGSVGElement>(null);
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isInitialLoad = useRef(true);
-  const userId = (user as any).uid || (user as any).id;
+  const userId = user.id;
 
   // Load Latest Log on Mount
   useEffect(() => {
     if (!userId) return;
 
-    const q = query(
-      collection(db, `users/${userId}/notes`),
-      orderBy('createdAt', 'desc'),
-      limit(1)
-    );
-
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      if (!snapshot.empty) {
-        const docData = snapshot.docs[0].data() as LogEntry;
-        const logId = snapshot.docs[0].id;
-        
-        if (isInitialLoad.current || (currentLog && currentLog.id !== logId)) {
-          setCurrentLog({ ...docData, id: logId });
-          setJournalText(docData.journalData || '');
+    const fetchLatestLog = async () => {
+      const { data, error } = await supabase
+        .from('folio_notes')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      
+      if (data) {
+        const docData = data as LogEntry;
+        if (isInitialLoad.current || (currentLog && currentLog.id !== data.id)) {
+          setCurrentLog(docData);
+          setJournalText(docData.journal_data || '');
           try {
-            setStrokes(JSON.parse(docData.canvasData || '[]'));
+            setStrokes(JSON.parse(docData.canvas_data || '[]'));
           } catch (e) { console.error("Canvas parse error", e); }
           
           // Fetch Supabase logs for the sheet
@@ -126,7 +110,7 @@ export function Folio({ user }: FolioProps) {
               time: l.date,
               topic: l.subject,
               status: 'Completed',
-              duration: l.duration_minutes
+              duration: l.duration
             })));
           }
 
@@ -139,24 +123,28 @@ export function Folio({ user }: FolioProps) {
         setStrokes([]);
         isInitialLoad.current = false;
       }
-    }, (error) => {
-      console.warn("Folio Notes Listener Error (Recoverable):", error);
-    });
+    };
 
-    return () => unsubscribe();
+    fetchLatestLog();
   }, [userId]);
 
   // Load Saved Journals
   useEffect(() => {
     if (!userId) return;
-    const q = query(
-      collection(db, `users/${userId}/journals`),
-      orderBy('createdAt', 'desc')
-    );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setSavedJournals(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
-    return () => unsubscribe();
+    
+    const fetchJournals = async () => {
+      const { data, error } = await supabase
+        .from('journals')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+      
+      if (data) {
+        setSavedJournals(data);
+      }
+    };
+
+    fetchJournals();
   }, [userId]);
 
   // Auto-save Logic
@@ -180,13 +168,13 @@ export function Folio({ user }: FolioProps) {
 
     try {
       const logData = {
-        userId,
+        user_id: userId,
         title: `Imperial Log - ${new Date().toLocaleDateString()}`,
-        journalData: journalText,
-        sheetData: JSON.stringify(sheetRows),
-        canvasData: JSON.stringify(strokes),
-        aiSummary: currentLog?.aiSummary || '',
-        createdAt: currentLog?.createdAt || serverTimestamp()
+        journal_data: journalText,
+        sheet_data: JSON.stringify(sheetRows),
+        canvas_data: JSON.stringify(strokes),
+        ai_summary: currentLog?.ai_summary || '',
+        created_at: currentLog?.created_at || new Date().toISOString()
       };
 
       // Save to Supabase (study_logs)
@@ -195,16 +183,25 @@ export function Folio({ user }: FolioProps) {
         await supabase.from('study_logs').insert({
           user_id: userId,
           subject: latestEntry.topic,
-          duration_minutes: latestEntry.duration || 60,
-          notes: journalText.substring(0, 500)
+          duration: latestEntry.duration || 60,
+          notes: journalText.substring(0, 500),
+          date: new Date().toISOString().split('T')[0]
         });
       }
 
       if (currentLog?.id) {
-        await updateDoc(doc(db, `users/${userId}/notes`, currentLog.id), logData);
+        await supabase
+          .from('folio_notes')
+          .update(logData)
+          .eq('id', currentLog.id);
       } else {
-        const docRef = await addDoc(collection(db, `users/${userId}/notes`), logData);
-        setCurrentLog({ ...logData, id: docRef.id });
+        const { data, error } = await supabase
+          .from('folio_notes')
+          .insert([logData])
+          .select()
+          .single();
+        
+        if (data) setCurrentLog(data);
       }
 
       if (!isAuto) setStatus({ type: 'success', message: "Imperial Log safely archived in Supabase." });
@@ -219,10 +216,10 @@ export function Folio({ user }: FolioProps) {
   const handleClearAll = async () => {
     if (!userId) return;
     try {
-      const q = query(collection(db, `users/${userId}/notes`));
-      const snapshot = await getDocs(q);
-      const deletePromises = snapshot.docs.map(d => deleteDoc(d.ref));
-      await Promise.all(deletePromises);
+      await supabase
+        .from('folio_notes')
+        .delete()
+        .eq('user_id', userId);
       
       setJournalText('');
       setSheetRows([]);
@@ -232,15 +229,17 @@ export function Folio({ user }: FolioProps) {
       setConfirmClearAll(false);
       setShowSettings(false);
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `users/${userId}/notes`);
+      console.error("Delete Error:", error);
+      setStatus({ type: 'error', message: "Failed to purge logs." });
     }
   };
 
   const runAIAnalysis = async () => {
-    if (!process.env.VINTAGE_ORACLE_KEY || isAnalyzing) return;
+    const apiKey = process.env.VINTAGE_ORACLE_KEY || process.env.GEMINI_API_KEY;
+    if (!apiKey || isAnalyzing) return;
     setIsAnalyzing(true);
     try {
-      const genAI = new GoogleGenAI({ apiKey: process.env.VINTAGE_ORACLE_KEY || "" });
+      const genAI = new GoogleGenAI({ apiKey });
       
       const prompt = `As the Imperial Scholar, analyze this UPSC aspirant's daily log:
         Journal: ${journalText}
@@ -253,18 +252,19 @@ export function Folio({ user }: FolioProps) {
         Format as clean Markdown.`;
 
       const aiResult = await genAI.models.generateContent({
-        model: "gemini-1.5-flash",
+        model: "gemini-3-flash-preview",
         contents: [{ role: "user", parts: [{ text: prompt }] }]
       });
       const text = aiResult.text;
       
       if (currentLog?.id) {
-        await updateDoc(doc(db, `users/${userId}/notes`, currentLog.id), {
-          aiSummary: text
-        });
+        await supabase
+          .from('folio_notes')
+          .update({ ai_summary: text })
+          .eq('id', currentLog.id);
       }
       
-      setCurrentLog(prev => prev ? { ...prev, aiSummary: text } : null);
+      setCurrentLog(prev => prev ? { ...prev, ai_summary: text } : null);
       setStatus({ type: 'success', message: "The Oracle has spoken. Analysis complete." });
     } catch (error) {
       console.error("AI Error:", error);
@@ -442,11 +442,11 @@ export function Folio({ user }: FolioProps) {
               <button 
                 onClick={async () => {
                   try {
-                    await addDoc(collection(db, `users/${userId}/journals`), {
-                      userId,
+                    await supabase.from('journals').insert({
+                      user_id: userId,
                       title: `Journal Entry - ${new Date().toLocaleDateString()}`,
                       content: journalText,
-                      createdAt: serverTimestamp()
+                      created_at: new Date().toISOString()
                     });
                     setStatus({ type: 'success', message: "Journal entry permanently archived." });
                   } catch (e) {
@@ -475,7 +475,7 @@ export function Folio({ user }: FolioProps) {
                       <span className="text-xs font-bold text-leather truncate w-full">{journal.title}</span>
                     </div>
                     <p className="text-[10px] font-serif italic text-leather/40 truncate">
-                      {new Date(journal.createdAt?.toDate?.() || journal.createdAt).toLocaleDateString()}
+                      {new Date(journal.created_at).toLocaleDateString()}
                     </p>
                   </button>
                 ))
@@ -706,9 +706,9 @@ export function Folio({ user }: FolioProps) {
             </div>
 
             <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
-              {currentLog?.aiSummary ? (
+              {currentLog?.ai_summary ? (
                 <div className="prose prose-sm font-serif italic text-leather/80 leading-relaxed">
-                  <ReactMarkdown>{currentLog.aiSummary}</ReactMarkdown>
+                  <ReactMarkdown>{currentLog.ai_summary}</ReactMarkdown>
                 </div>
               ) : (
                 <div className="h-full flex flex-col items-center justify-center text-center opacity-20 grayscale">

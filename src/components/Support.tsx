@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { User } from 'firebase/auth';
-import { db, collection, query, onSnapshot, addDoc, serverTimestamp, OperationType, handleFirestoreError, orderBy, where, limit } from '../lib/firebase';
+import { User as SupabaseUser } from '@supabase/supabase-js';
+import { supabase } from '../lib/supabase';
 import { Send, MessageSquare, Heart, Phone, Mail, Sparkles, User as UserIcon, Shield, Zap } from 'lucide-react';
 import { Button } from './ui/button';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
 
 interface SupportProps {
-  user: User;
+  user: SupabaseUser;
 }
 
 export function Support({ user }: SupportProps) {
@@ -28,15 +28,18 @@ export function Support({ user }: SupportProps) {
     
     try {
       const ticketId = `TIC-${Math.floor(100000 + Math.random() * 900000)}`;
-      const path = 'supportTickets';
-      await addDoc(collection(db, path), {
-        userId: user.uid,
-        userName: user.displayName,
-        issue: ticketIssue,
-        ticketId,
-        status: 'open',
-        createdAt: serverTimestamp()
-      });
+      const { error } = await supabase
+        .from('support_tickets')
+        .insert([{
+          user_id: user.id,
+          user_name: user.user_metadata?.full_name,
+          issue: ticketIssue,
+          ticket_id: ticketId,
+          status: 'open',
+          created_at: new Date().toISOString()
+        }]);
+
+      if (error) throw error;
 
       alert(`The Vizier has issued Ticket #${ticketId}. Your concerns have been inscribed in the Imperial Ledger.`);
       setTicketIssue('');
@@ -48,56 +51,99 @@ export function Support({ user }: SupportProps) {
   };
 
   useEffect(() => {
-    // Find or create chat session
-    const chatsPath = 'supportChats';
-    const q = query(collection(db, chatsPath), where('userId', '==', user.uid), limit(1));
-    
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      if (snapshot.empty) {
-        const newChat = await addDoc(collection(db, chatsPath), {
-          userId: user.uid,
-          status: 'active',
-          lastMessageAt: serverTimestamp()
-        });
-        setChatId(newChat.id);
-      } else {
-        setChatId(snapshot.docs[0].id);
-      }
-    });
+    if (!user.id) return;
 
-    return () => unsubscribe();
-  }, [user.uid]);
+    const findOrCreateChat = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('support_chats')
+          .select('id')
+          .eq('user_id', user.id)
+          .eq('status', 'active')
+          .maybeSingle();
+        
+        if (error) throw error;
+
+        if (data) {
+          setChatId(data.id);
+        } else {
+          const { data: newChat, error: createError } = await supabase
+            .from('support_chats')
+            .insert([{
+              user_id: user.id,
+              status: 'active',
+              last_message_at: new Date().toISOString()
+            }])
+            .select()
+            .single();
+          
+          if (createError) throw createError;
+          setChatId(newChat.id);
+        }
+      } catch (err) {
+        console.error("Chat Session Error:", err);
+      }
+    };
+
+    findOrCreateChat();
+  }, [user.id]);
 
   useEffect(() => {
     if (!chatId) return;
 
-    const messagesPath = `supportChats/${chatId}/messages`;
-    const q = query(collection(db, messagesPath), orderBy('createdAt', 'asc'));
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      setTimeout(() => scrollRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
-    });
+    const fetchMessages = async () => {
+      const { data, error } = await supabase
+        .from('support_messages')
+        .select('*')
+        .eq('chat_id', chatId)
+        .order('created_at', { ascending: true });
+      
+      if (error) console.error("Error fetching messages:", error);
+      else {
+        setMessages(data || []);
+        setTimeout(() => scrollRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+      }
+    };
 
-    return () => unsubscribe();
+    fetchMessages();
+
+    const subscription = supabase
+      .channel(`chat_${chatId}`)
+      .on('postgres_changes', { 
+        event: 'INSERT', 
+        schema: 'public', 
+        table: 'support_messages', 
+        filter: `chat_id=eq.${chatId}` 
+      }, (payload) => {
+        setMessages(prev => [...prev, payload.new]);
+        setTimeout(() => scrollRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(subscription);
+    };
   }, [chatId]);
 
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim() || !chatId) return;
 
-    const messagesPath = `supportChats/${chatId}/messages`;
     const text = newMessage;
     setNewMessage('');
 
     try {
-      await addDoc(collection(db, messagesPath), {
-        chatId,
-        senderId: user.uid,
-        senderRole: 'user',
-        text,
-        createdAt: serverTimestamp()
-      });
+      const { error } = await supabase
+        .from('support_messages')
+        .insert([{
+          chat_id: chatId,
+          sender_id: user.id,
+          sender_role: 'user',
+          text,
+          created_at: new Date().toISOString()
+        }]);
+
+      if (error) throw error;
 
       // AI Response Logic
       setIsAIThinking(true);
@@ -105,13 +151,15 @@ export function Support({ user }: SupportProps) {
       if (!process.env.VINTAGE_ORACLE_KEY) {
         setTimeout(async () => {
           const aiText = "The Grand Vizier is currently in a deep meditative state (Guest Mode). While the Imperial Oracle Key is missing, I can still offer basic guidance on your journey. How may I assist you with the archives today?";
-          await addDoc(collection(db, messagesPath), {
-            chatId,
-            senderId: 'ai-assistant',
-            senderRole: 'ai',
-            text: aiText,
-            createdAt: serverTimestamp()
-          });
+          await supabase
+            .from('support_messages')
+            .insert([{
+              chat_id: chatId,
+              sender_id: 'ai-assistant',
+              sender_role: 'ai',
+              text: aiText,
+              created_at: new Date().toISOString()
+            }]);
           setIsAIThinking(false);
         }, 1000);
         return;
@@ -139,35 +187,40 @@ export function Support({ user }: SupportProps) {
       });
       const aiText = aiResult.text || "The Grand Vizier is currently indisposed.";
 
-      await addDoc(collection(db, messagesPath), {
-        chatId,
-        senderId: 'ai-assistant',
-        senderRole: 'ai',
-        text: aiText,
-        createdAt: serverTimestamp()
-      });
+      await supabase
+        .from('support_messages')
+        .insert([{
+          chat_id: chatId,
+          sender_id: 'ai-assistant',
+          sender_role: 'ai',
+          text: aiText,
+          created_at: new Date().toISOString()
+        }]);
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, messagesPath);
+       console.error("Support Chat Error:", error);
     } finally {
       setIsAIThinking(false);
     }
   };
 
   const submitFeedback = async (message: string) => {
-    const path = 'supportMessages';
     try {
-      await addDoc(collection(db, path), {
-        userId: user.uid,
-        userName: user.displayName,
-        userEmail: user.email,
-        message,
-        type: 'feedback',
-        status: 'new',
-        createdAt: serverTimestamp()
-      });
+      const { error } = await supabase
+        .from('support_messages_public') // Using a separate table or different structure for feedback
+        .insert([{
+          user_id: user.id,
+          user_name: user.user_metadata?.full_name,
+          user_email: user.email,
+          message,
+          type: 'feedback',
+          status: 'new',
+          created_at: new Date().toISOString()
+        }]);
+      
+      if (error) throw error;
       alert("Your feedback has been recorded in the Imperial Ledger. Thank you, Scholar.");
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, path);
+      console.error("Feedback Error:", error);
     }
   };
 

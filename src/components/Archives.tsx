@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db, collection, onSnapshot, query, orderBy, OperationType, handleFirestoreError } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 import { BookOpen, FileText, Video, ExternalLink, Search, Filter } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -9,16 +9,31 @@ export function Archives() {
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState<string>('all');
 
+  const fetchResources = async () => {
+    const { data, error } = await supabase
+      .from('resources')
+      .select('*')
+      .order('created_at', { ascending: false });
+    
+    if (error) {
+      console.error("Error fetching archives:", error);
+    } else {
+      setResources(data || []);
+    }
+    setLoading(false);
+  };
+
   useEffect(() => {
-    const path = 'resources';
-    const q = query(collection(db, path), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setResources(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, path);
-    });
-    return () => unsubscribe();
+    fetchResources();
+
+    const channel = supabase
+      .channel('resources_changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'resources' }, fetchResources)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const categories = [

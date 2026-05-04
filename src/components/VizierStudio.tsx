@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { User } from 'firebase/auth';
+import { User as SupabaseUser } from '@supabase/supabase-js';
 import { GoogleGenAI } from "@google/genai";
 import { Terminal, Sparkles, Send, Code, Cpu, Zap, History, RefreshCw, X } from 'lucide-react';
 import { Button } from './ui/button';
@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 
 interface VizierStudioProps {
-  user: User;
+  user: SupabaseUser;
 }
 
 export function VizierStudio({ user }: VizierStudioProps) {

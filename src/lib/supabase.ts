@@ -67,10 +67,10 @@ export const signInWithEmail = async (email: string, password: string) => {
     throw new Error(msg);
   }
   
-  console.log(`[Auth] Attempting sign-in for: ${email}`);
+  console.log(`[Auth] Attempting sign-in for: ${email.trim()}`);
   try {
     const { data, error } = await supabase.auth.signInWithPassword({
-      email,
+      email: email.trim(),
       password,
     });
     
@@ -81,10 +81,8 @@ export const signInWithEmail = async (email: string, password: string) => {
         code: (error as any).code
       });
       
-      if (error.message.includes("Invalid login credentials")) {
-        // Double check if user exists (this is a security concern if exposed, 
-        // but for debugging we log the full error)
-        throw new Error("The Imperial Guard does not recognize these credentials. Please check your email/password or Register.");
+      if (error.message.includes("Invalid login credentials") || error.message.includes("invalid claim")) {
+        throw new Error("The Imperial Guard does not recognize these credentials. Please ensure your email and password are correct, or Register for a new account.");
       }
       
       if (error.message.includes("Email not confirmed")) {
@@ -97,7 +95,6 @@ export const signInWithEmail = async (email: string, password: string) => {
     console.log("[Auth] Sign-in successful for user ID:", data.user?.id);
     return data;
   } catch (error: any) {
-    console.error('[Provider Error Detail]:', error.message || error);
     throw error;
   }
 };
@@ -109,10 +106,10 @@ export const signUpWithEmail = async (email: string, password: string) => {
     throw new Error(msg);
   }
 
-  console.log(`[Auth] Attempting registration for: ${email}`);
+  console.log(`[Auth] Attempting registration for: ${email.trim()}`);
   try {
     const { data, error } = await supabase.auth.signUp({
-      email,
+      email: email.trim(),
       password,
       options: {
         emailRedirectTo: window.location.origin,
@@ -134,7 +131,6 @@ export const signUpWithEmail = async (email: string, password: string) => {
 
     return data;
   } catch (error: any) {
-    console.error('[Provider Error Detail]:', error.message || error);
     throw error;
   }
 };

@@ -1,20 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { User } from 'firebase/auth';
-import { 
-  collection, 
-  query, 
-  orderBy, 
-  onSnapshot, 
-  addDoc, 
-  serverTimestamp, 
-  doc, 
-  deleteDoc,
-  where,
-  limit,
-  setDoc
-} from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage, handleFirestoreError, OperationType } from '../lib/firebase';
+import { User as SupabaseUser } from '@supabase/supabase-js';
+import { supabase } from '../lib/supabase';
 import { 
   Book, 
   Library as LibraryIcon, 
@@ -48,11 +34,11 @@ interface ResourceHubItem {
   uploader_id: string;
   category: string;
   type: 'pdf' | 'video' | 'link';
-  timestamp: any;
+  created_at: string;
 }
 
 interface IntegratedResourceHubProps {
-  user: User;
+  user: SupabaseUser;
   isAdmin: boolean;
 }
 
@@ -77,49 +63,65 @@ export function IntegratedResourceHub({ user, isAdmin }: IntegratedResourceHubPr
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    // Wait for Firebase auth to be ready
-    if (!user || !db) return;
+    if (!user) return;
 
-    const q = query(collection(db, 'resource_hub'), orderBy('timestamp', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setResources(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ResourceHubItem)));
-    }, (error) => {
-      // Don't throw for list operations to prevent app crash, just log and notify
-      console.error("Resource Hub Listener Error:", error);
-      if (error.message.includes('permission-denied')) {
-        setStatus({ type: 'error', message: "Imperial Authentication pending. Retrying link to Archives..." });
-      }
-    });
-    return () => unsubscribe();
+    fetchResources();
+
+    const subscription = supabase
+      .channel('resource_hub_changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'resource_hub' }, fetchResources)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(subscription);
+    };
   }, [user]);
 
+  const fetchResources = async () => {
+    const { data, error } = await supabase
+      .from('resource_hub')
+      .select('*')
+      .order('created_at', { ascending: false });
+    
+    if (error) {
+      console.error("Resource Hub Fetch Error:", error);
+      setStatus({ type: 'error', message: "Imperial Authentication pending. Retrying link to Archives..." });
+    } else {
+      setResources(data || []);
+    }
+  };
+
   useEffect(() => {
-    if (!user?.uid || resources.length === 0 || !db) return;
-    const q = query(
-      collection(db, 'recentlyViewed'), 
-      where('userId', '==', user.uid),
-      orderBy('viewedAt', 'desc'),
-      limit(5)
-    );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const viewedIds = snapshot.docs.map(doc => doc.data().resourceId);
-      const viewedResources = viewedIds.map(id => resources.find(r => r.id === id)).filter(Boolean) as ResourceHubItem[];
-      setRecentlyViewed(viewedResources);
-    }, (error) => {
-      console.warn("Recently Viewed Listener (Recoverable):", error);
-    });
-    return () => unsubscribe();
-  }, [user?.uid, resources]);
+    if (!user?.id || resources.length === 0) return;
+    
+    const fetchRecentlyViewed = async () => {
+      const { data, error } = await supabase
+        .from('recently_viewed')
+        .select('resource_id')
+        .eq('user_id', user.id)
+        .order('viewed_at', { ascending: false })
+        .limit(5);
+      
+      if (data) {
+        const viewedIds = data.map(d => d.resource_id);
+        const viewedResources = viewedIds.map(id => resources.find(r => r.id === id)).filter(Boolean) as ResourceHubItem[];
+        setRecentlyViewed(viewedResources);
+      }
+    };
+
+    fetchRecentlyViewed();
+  }, [user?.id, resources]);
 
   const recordView = async (resource: ResourceHubItem) => {
-    if (!user?.uid) return;
+    if (!user?.id) return;
     try {
-      const viewRef = doc(db, 'recentlyViewed', `${user.uid}_${resource.id}`);
-      await setDoc(viewRef, {
-        userId: user.uid,
-        resourceId: resource.id,
-        viewedAt: serverTimestamp()
-      });
+      await supabase
+        .from('recently_viewed')
+        .upsert({
+          user_id: user.id,
+          resource_id: resource.id,
+          viewed_at: new Date().toISOString()
+        }, { onConflict: 'user_id,resource_id' });
     } catch (error) {
       console.error("Error recording view:", error);
     }
@@ -137,40 +139,42 @@ export function IntegratedResourceHub({ user, isAdmin }: IntegratedResourceHubPr
       let finalUrl = newResource.externalUrl;
 
       if (newResource.file) {
-        const storageRef = ref(storage, `resource_hub/${Date.now()}_${newResource.file.name}`);
-        const uploadResult = await uploadBytes(storageRef, newResource.file);
-        finalUrl = await getDownloadURL(uploadResult.ref);
+        const filePath = `resource_hub/${Date.now()}_${newResource.file.name}`;
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from('resource_hub')
+          .upload(filePath, newResource.file);
+        
+        if (uploadError) throw uploadError;
+        
+        const { data: { publicUrl } } = supabase.storage
+          .from('resource_hub')
+          .getPublicUrl(filePath);
+        
+        finalUrl = publicUrl;
       }
 
-      await addDoc(collection(db, 'resource_hub'), {
-        title: newResource.title,
-        file_url: finalUrl,
-        uploader_name: user.displayName || 'Anonymous Scholar',
-        uploader_id: user.uid,
-        category: newResource.category,
-        type: newResource.type,
-        timestamp: serverTimestamp()
-      });
+      const { error: insertError } = await supabase
+        .from('resource_hub')
+        .insert([{
+          title: newResource.title,
+          file_url: finalUrl,
+          uploader_name: user.user_metadata?.full_name || 'Anonymous Scholar',
+          uploader_id: user.id,
+          category: newResource.category,
+          type: newResource.type,
+          created_at: new Date().toISOString()
+        }]);
+
+      if (insertError) throw insertError;
 
       setStatus({ type: 'success', message: "Resource successfully archived in the Hub." });
       setNewResource({ title: '', category: 'General', type: 'pdf', file: null, externalUrl: '' });
       if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (error: any) {
       console.error("[Resource Hub Upload Failure]", error);
-      
-      let errorMsg = "The Imperial archives could not accept the file.";
-      
-      if (error.message?.includes('Failed to fetch')) {
-        errorMsg = "Treasury Network Error: Failed to connect to the Imperial Archives. Please check your connectivity or Cloud configuration.";
-      } else if (error.message?.includes('permission-denied')) {
-        errorMsg = "Imperial Archive Access Denied: You do not have the required clearance level (Admin) to modify the Hub.";
-      } else if (error.message) {
-        errorMsg = `Archival Conflict: ${error.message}`;
-      }
-      
       setStatus({ 
         type: 'error', 
-        message: errorMsg
+        message: `Archival Conflict: ${error.message}`
       });
     } finally {
       setIsUploading(false);
@@ -179,12 +183,17 @@ export function IntegratedResourceHub({ user, isAdmin }: IntegratedResourceHubPr
 
   const handleDelete = async (id: string) => {
     try {
-      await deleteDoc(doc(db, 'resource_hub', id));
+      const { error } = await supabase
+        .from('resource_hub')
+        .delete()
+        .eq('id', id);
+      
+      if (error) throw error;
       setStatus({ type: 'success', message: "Resource removed from the Hub." });
       setConfirmDelete(null);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, 'resource_hub');
-      setStatus({ type: 'error', message: "Delete failed." });
+    } catch (error: any) {
+      console.error("Delete failed:", error);
+      setStatus({ type: 'error', message: `Delete failed: ${error.message}` });
     }
   };
 
@@ -472,14 +481,14 @@ export function IntegratedResourceHub({ user, isAdmin }: IntegratedResourceHubPr
                       </span>
                     </div>
                     
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-full bg-saddle-brown/5 flex items-center justify-center">
-                        <Clock size={12} className="text-saddle-brown/40" />
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-full bg-saddle-brown/5 flex items-center justify-center">
+                          <Clock size={12} className="text-saddle-brown/40" />
+                        </div>
+                        <span className="text-[10px] text-saddle-brown/40 uppercase tracking-widest">
+                          {new Date(res.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) || 'Recently'}
+                        </span>
                       </div>
-                      <span className="text-[10px] text-saddle-brown/40 uppercase tracking-widest">
-                        {res.timestamp?.toDate().toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) || 'Recently'}
-                      </span>
-                    </div>
                   </div>
 
                   <div className="flex items-center justify-between mt-6 pt-4 border-t border-saddle-brown/5">

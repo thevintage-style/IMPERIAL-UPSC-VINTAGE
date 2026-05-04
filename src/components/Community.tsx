@@ -1,19 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { User } from 'firebase/auth';
-import { 
-  collection, 
-  query, 
-  orderBy, 
-  limit, 
-  onSnapshot, 
-  addDoc, 
-  serverTimestamp, 
-  doc, 
-  updateDoc, 
-  deleteDoc,
-  where
-} from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { User as SupabaseUser } from '@supabase/supabase-js';
+import { supabase } from '../lib/supabase';
 import { 
   Send, 
   Pin, 
@@ -36,44 +23,62 @@ import ReactMarkdown from 'react-markdown';
 interface Comment {
   id: string;
   text: string;
-  senderId: string;
-  senderName: string;
-  createdAt: any;
+  sender_id: string;
+  sender_name: string;
+  created_at: any;
 }
 
 interface Message {
   id: string;
   text: string;
-  senderId: string;
-  senderName: string;
-  senderPhoto?: string;
-  isPinned?: boolean;
+  sender_id: string;
+  sender_name: string;
+  sender_photo?: string;
+  is_pinned?: boolean;
   reactions?: Record<string, number>;
-  replyToId?: string;
-  createdAt: any;
+  reply_to_id?: string;
+  created_at: any;
   type: 'text' | 'pdf' | 'link';
   comments?: Comment[];
   channel?: 'general' | 'highlights';
 }
 
 interface CommunityProps {
-  user: User;
+  user: SupabaseUser;
   isAdmin: boolean;
 }
 
-const CommentSection = ({ msgId, channel }: { msgId: string, channel?: string }) => {
+const CommentSection = ({ msgId }: { msgId: string }) => {
   const [comments, setComments] = useState<Comment[]>([]);
 
   useEffect(() => {
-    const q = query(
-      collection(db, `communityMessages/${msgId}/comments`),
-      orderBy('createdAt', 'asc')
-    );
-    return onSnapshot(q, (snapshot) => {
-      setComments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Comment)));
-    }, (error) => {
-      console.error("Comments Listener Error:", error);
-    });
+    const fetchComments = async () => {
+      const { data } = await supabase
+        .from('community_comments')
+        .select('*')
+        .eq('message_id', msgId)
+        .order('created_at', { ascending: true });
+      
+      if (data) setComments(data);
+    };
+
+    fetchComments();
+
+    const channel = supabase
+      .channel(`comments:${msgId}`)
+      .on('postgres_changes', { 
+        event: 'INSERT', 
+        schema: 'public', 
+        table: 'community_comments',
+        filter: `message_id=eq.${msgId}`
+      }, (payload) => {
+        setComments(prev => [...prev, payload.new as Comment]);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [msgId]);
 
   if (comments.length === 0) return null;
@@ -83,9 +88,9 @@ const CommentSection = ({ msgId, channel }: { msgId: string, channel?: string })
       {comments.map((comment) => (
         <div key={comment.id} className="bg-[#F5F2E7]/30 p-3 rounded-xl border border-[#B2AC88]/10 text-xs">
           <div className="flex justify-between items-center mb-1">
-            <span className="font-bold text-[#8B4513]">{comment.senderName}</span>
+            <span className="font-bold text-[#8B4513]">{comment.sender_name}</span>
             <span className="text-[8px] opacity-40 italic">
-              {comment.createdAt?.toDate?.()?.toLocaleDateString() || 'Just now'}
+              {new Date(comment.created_at).toLocaleDateString()}
             </span>
           </div>
           <p className="text-leather/80 leading-relaxed">{comment.text}</p>
@@ -129,32 +134,43 @@ export function Community({ user, isAdmin }: CommunityProps) {
   const adminChatId = "ADMIN_HUB";
 
   useEffect(() => {
-    if (!user?.uid || !db) return;
-    const q = query(
-      collection(db, 'communityMessages'),
-      where('channel', '==', activeChannel),
-      orderBy('createdAt', 'asc'),
-      limit(100)
-    );
+    if (!user?.id) return;
 
-    // Fallback for older messages without channel field
-    const qLegacy = activeChannel === 'general' ? query(
-      collection(db, 'communityMessages'),
-      orderBy('createdAt', 'asc'),
-      limit(100)
-    ) : null;
+    const fetchMessages = async () => {
+      const { data } = await supabase
+        .from('community_messages')
+        .select('*')
+        .eq('channel', activeChannel)
+        .order('created_at', { ascending: true })
+        .limit(100);
+      
+      if (data) setMessages(data as Message[]);
+    };
 
-    const unsubscribe = onSnapshot(activeChannel === 'highlights' ? q : qLegacy || q, (snapshot) => {
-      const msgs = snapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() }))
-        .filter((m: any) => !m.channel || m.channel === activeChannel) as Message[];
-      setMessages(msgs);
-    }, (error) => {
-      console.error("Community Messages Listener Error:", error);
-    });
+    fetchMessages();
 
-    return () => unsubscribe();
-  }, [activeChannel]);
+    const channel = supabase
+      .channel(`messages:${activeChannel}`)
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'community_messages',
+        filter: `channel=eq.${activeChannel}`
+      }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          setMessages(prev => [...prev, payload.new as Message]);
+        } else if (payload.eventType === 'UPDATE') {
+          setMessages(prev => prev.map(m => m.id === payload.new.id ? { ...m, ...payload.new } : m));
+        } else if (payload.eventType === 'DELETE') {
+          setMessages(prev => prev.filter(m => m.id !== payload.old.id));
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeChannel, user?.id]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -164,7 +180,8 @@ export function Community({ user, isAdmin }: CommunityProps) {
 
   const filterMessage = async (text: string) => {
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.VINTAGE_ORACLE_KEY || "" });
+      const apiKey = process.env.VINTAGE_ORACLE_KEY || process.env.GEMINI_API_KEY;
+      const ai = new GoogleGenAI({ apiKey: apiKey || "" });
       const aiResult = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: [{ role: "user", parts: [{ text: `
@@ -195,13 +212,13 @@ export function Community({ user, isAdmin }: CommunityProps) {
     }
 
     try {
-      await addDoc(collection(db, 'communityMessages'), {
+      await supabase.from('community_messages').insert({
         text: inputText,
-        senderId: user.uid,
-        senderName: user.displayName || 'Anonymous Scholar',
-        senderPhoto: user.photoURL,
+        sender_id: user.id,
+        sender_name: user.user_metadata?.full_name || user.email || 'Anonymous Scholar',
+        sender_photo: user.user_metadata?.avatar_url,
         type: 'text',
-        createdAt: serverTimestamp(),
+        created_at: new Date().toISOString(),
         reactions: {},
         channel: activeChannel
       });
@@ -216,9 +233,10 @@ export function Community({ user, isAdmin }: CommunityProps) {
   const handlePinMessage = async (msgId: string, currentPinned: boolean) => {
     if (!isAdmin) return;
     try {
-      await updateDoc(doc(db, 'communityMessages', msgId), {
-        isPinned: !currentPinned
-      });
+      await supabase
+        .from('community_messages')
+        .update({ is_pinned: !currentPinned })
+        .eq('id', msgId);
     } catch (error) {
       console.error("Error pinning message:", error);
     }
@@ -227,7 +245,10 @@ export function Community({ user, isAdmin }: CommunityProps) {
   const handleDeleteMessage = async (msgId: string) => {
     if (!isAdmin) return;
     try {
-      await deleteDoc(doc(db, 'communityMessages', msgId));
+      await supabase
+        .from('community_messages')
+        .delete()
+        .eq('id', msgId);
     } catch (error) {
       console.error("Error deleting message:", error);
     }
@@ -241,9 +262,10 @@ export function Community({ user, isAdmin }: CommunityProps) {
     newReactions[emoji] = (newReactions[emoji] || 0) + 1;
 
     try {
-      await updateDoc(doc(db, 'communityMessages', msgId), {
-        reactions: newReactions
-      });
+      await supabase
+        .from('community_messages')
+        .update({ reactions: newReactions })
+        .eq('id', msgId);
     } catch (error) {
       console.error("Error adding reaction:", error);
     }
@@ -253,11 +275,12 @@ export function Community({ user, isAdmin }: CommunityProps) {
     if (!replyText.trim()) return;
 
     try {
-      await addDoc(collection(db, `communityMessages/${msgId}/comments`), {
+      await supabase.from('community_comments').insert({
+        message_id: msgId,
         text: replyText,
-        senderId: user.uid,
-        senderName: user.displayName || 'Anonymous Scholar',
-        createdAt: serverTimestamp()
+        sender_id: user.id,
+        sender_name: user.user_metadata?.full_name || user.email || 'Anonymous Scholar',
+        created_at: new Date().toISOString()
       });
       setReplyText('');
       setActiveReplyId(null);
@@ -266,7 +289,7 @@ export function Community({ user, isAdmin }: CommunityProps) {
     }
   };
 
-  const pinnedMessages = messages.filter(m => m.isPinned);
+  const pinnedMessages = messages.filter(m => m.is_pinned);
 
   return (
     <div className="h-full flex flex-col bg-parchment/50 rounded-3xl border-2 border-saddle-brown/20 overflow-hidden shadow-inner">
@@ -336,12 +359,12 @@ export function Community({ user, isAdmin }: CommunityProps) {
             </div>
             <div className="bg-white p-6 rounded-3xl border border-saddle-brown/10 shadow-sm text-center">
               <Sparkles className="mx-auto text-antique-gold mb-2" size={32} />
-              <p className="text-2xl font-serif font-bold text-leather">{new Set(messages.map(m => m.senderId)).size}</p>
+              <p className="text-2xl font-serif font-bold text-leather">{new Set(messages.map(m => m.sender_id)).size}</p>
               <p className="text-[10px] uppercase tracking-widest text-saddle-brown/40">Active Scholars</p>
             </div>
             <div className="bg-white p-6 rounded-3xl border border-saddle-brown/10 shadow-sm text-center">
               <Pin className="mx-auto text-saddle-brown/60 mb-2 rotate-45" size={32} />
-              <p className="text-2xl font-serif font-bold text-leather">{messages.filter(m => m.isPinned).length}</p>
+              <p className="text-2xl font-serif font-bold text-leather">{messages.filter(m => m.is_pinned).length}</p>
               <p className="text-[10px] uppercase tracking-widest text-saddle-brown/40">Pinned Decrees</p>
             </div>
           </div>
@@ -417,13 +440,13 @@ export function Community({ user, isAdmin }: CommunityProps) {
                 <div className="flex items-center justify-between mb-6">
                   <div className="flex items-center gap-3">
                     <img 
-                      src={msg.senderPhoto || `https://api.dicebear.com/7.x/avataaars/svg?seed=${msg.senderId}`} 
+                      src={msg.sender_photo || `https://api.dicebear.com/7.x/avataaars/svg?seed=${msg.sender_id}`} 
                       className="w-10 h-10 rounded-full border-2 border-[#B2AC88]/20 shadow-sm" 
                       alt="" 
                     />
                     <div>
-                      <h5 className="text-[10px] font-bold uppercase tracking-widest text-[#8B4513]">{msg.senderName}</h5>
-                      <p className="text-[8px] font-serif italic text-leather/40">Archived on {msg.createdAt?.toDate?.()?.toLocaleDateString() || 'Recently'}</p>
+                      <h5 className="text-[10px] font-bold uppercase tracking-widest text-[#8B4513]">{msg.sender_name}</h5>
+                      <p className="text-[8px] font-serif italic text-leather/40">Archived on {new Date(msg.created_at).toLocaleDateString()}</p>
                     </div>
                   </div>
                   {isAdmin && (
@@ -542,7 +565,7 @@ export function Community({ user, isAdmin }: CommunityProps) {
         className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar"
       >
         {messages.map((msg, idx) => {
-          const isOwn = msg.senderId === user.uid;
+          const isOwn = msg.sender_id === user.id;
           return (
             <motion.div 
               initial={{ opacity: 0, y: 10 }}
@@ -552,8 +575,8 @@ export function Community({ user, isAdmin }: CommunityProps) {
             >
               <div className={`max-w-[80%] space-y-1 ${isOwn ? 'items-end' : 'items-start'}`}>
                 <div className={`flex items-center gap-2 text-[10px] font-bold uppercase tracking-tighter text-saddle-brown/60 ${isOwn ? 'flex-row-reverse' : ''}`}>
-                  <span>{msg.senderName}</span>
-                  {msg.isPinned && <Pin size={10} className="text-antique-gold rotate-45" />}
+                  <span>{msg.sender_name}</span>
+                  {msg.is_pinned && <Pin size={10} className="text-antique-gold rotate-45" />}
                 </div>
                 
                 <div className={`relative group p-4 rounded-2xl shadow-sm border ${
@@ -599,8 +622,8 @@ export function Community({ user, isAdmin }: CommunityProps) {
                     {isAdmin && (
                       <>
                         <button 
-                          onClick={() => handlePinMessage(msg.id, !!msg.isPinned)}
-                          className={`p-1.5 bg-white border border-saddle-brown/10 rounded-full hover:bg-parchment transition-colors ${msg.isPinned ? 'text-antique-gold' : 'text-saddle-brown/40'}`}
+                          onClick={() => handlePinMessage(msg.id, !!msg.is_pinned)}
+                          className={`p-1.5 bg-white border border-saddle-brown/10 rounded-full hover:bg-parchment transition-colors ${msg.is_pinned ? 'text-antique-gold' : 'text-saddle-brown/40'}`}
                         >
                           <Pin size={12} />
                         </button>
@@ -673,9 +696,9 @@ export function Community({ user, isAdmin }: CommunityProps) {
       <ReportModal
         isOpen={!!reportingMsg}
         onClose={() => setReportingMsg(null)}
-        reporterId={user.uid}
-        reportedId={reportingMsg?.senderId || ''}
-        reportedName={reportingMsg?.senderName || ''}
+        reporterId={user.id}
+        reportedId={reportingMsg?.sender_id || ''}
+        reportedName={reportingMsg?.sender_name || ''}
         context={`Community Message: ${reportingMsg?.text}`}
       />
     </div>

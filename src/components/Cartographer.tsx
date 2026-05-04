@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { User } from 'firebase/auth';
+import { User as SupabaseUser } from '@supabase/supabase-js';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -7,20 +7,6 @@ import { Search, Navigation, Info, Sparkles, MapPin, Compass, Layers, Wind, Drop
 import { Button } from './ui/button';
 import { GoogleGenAI } from '@google/genai';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  collection, 
-  query, 
-  where, 
-  orderBy, 
-  onSnapshot, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc, 
-  doc, 
-  serverTimestamp,
-  getDocs
-} from 'firebase/firestore';
-import { db } from '../lib/firebase';
 import { supabase } from '../lib/supabase';
 import ReactMarkdown from 'react-markdown';
 
@@ -42,7 +28,7 @@ const SelectedIcon = createVintageIcon('#A52A2A');
 L.Marker.prototype.options.icon = VintageIcon;
 
 interface CartographerProps {
-  user: User;
+  user: SupabaseUser;
 }
 
 interface CustomMarker {
@@ -164,30 +150,30 @@ export function Cartographer({ user }: CartographerProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
 
-  const userId = (user as any).uid || (user as any).id;
+  const userId = user.id;
 
-  // Load saved markers from Firestore (Imperial Vault)
+  // Load saved markers from Supabase
   useEffect(() => {
     if (!userId) return;
     const fetchMarkers = async () => {
       try {
-        const q = query(
-          collection(db, `users/${userId}/notes`),
-          where('type', '==', 'map_marker'),
-          orderBy('createdAt', 'desc')
-        );
-        const querySnapshot = await getDocs(q);
-        const markers = querySnapshot.docs.map(doc => {
-          const data = doc.data();
-          return {
-            id: doc.id,
-            lat: data.lat,
-            lon: data.lon,
-            name: data.title.replace('Strategic Point: ', ''),
-            annotation: data.annotation,
-            analysis: data.content
-          } as CustomMarker;
-        });
+        const { data, error } = await supabase
+          .from('map_markers')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false });
+        
+        if (error) throw error;
+        
+        const markers = (data || []).map(m => ({
+          id: m.id,
+          lat: m.lat,
+          lon: m.lon,
+          name: m.title.replace('Strategic Point: ', ''),
+          annotation: m.annotation,
+          analysis: m.content
+        } as CustomMarker));
+        
         setSavedMarkers(markers);
       } catch (error) {
         console.error("Error fetching map archives:", error);
@@ -274,19 +260,24 @@ export function Cartographer({ user }: CartographerProps) {
       
       const markerData = {
         title: `Strategic Point: ${markerName}`,
-        type: 'map_marker',
         lat: selectedPoint.lat,
         lon: selectedPoint.lon,
         annotation: annotation,
         content: analysis || 'No analysis available.',
-        createdAt: serverTimestamp(),
-        userId: userId
+        user_id: userId,
+        created_at: new Date().toISOString()
       };
 
-      const docRef = await addDoc(collection(db, `users/${userId}/notes`), markerData);
+      const { data, error } = await supabase
+        .from('map_markers')
+        .insert([markerData])
+        .select()
+        .single();
+
+      if (error) throw error;
 
       setSavedMarkers(prev => [{
-        id: docRef.id,
+        id: data.id,
         lat: selectedPoint.lat,
         lon: selectedPoint.lon,
         name: markerName,

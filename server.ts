@@ -4,12 +4,8 @@ import path from "path";
 import { fileURLToPath } from "url";
 import axios from "axios";
 import * as cheerio from "cheerio";
-import Razorpay from "razorpay";
-import crypto from "crypto";
 import Parser from "rss-parser";
 import { GoogleGenAI } from "@google/genai";
-import admin from "firebase-admin";
-import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import fs from "fs";
 
 process.env.NODE_ENV = process.env.NODE_ENV || 'development';
@@ -19,11 +15,17 @@ process.env.NODE_ENV = process.env.NODE_ENV || 'development';
  */
 const validateEnv = () => {
   // Common placeholders to treat as "missing"
-  const placeholders = ["your_key_here", "your_secret_here", "your_url_here", "undefined", "null", "rzp_test_mock", "placeholder", "todo", "missing"];
+  const placeholders = [
+    "your_key_here", "your_secret_here", "your_url_here", "undefined", "null", 
+    "placeholder", "todo", "missing", "none", "empty",
+    "supabase_url", "supabase_service_role_key"
+  ];
   const isPlaceholder = (val?: string) => {
     if (!val) return true;
     const v = val.trim().replace(/^["']|["']$/g, '').toLowerCase();
-    return placeholders.includes(v) || v.includes("your_") || v.includes("<") || v.includes("[") || v.length < 6;
+    // Also treat environment variable references as placeholders
+    if (v.startsWith('process.env.') || v.startsWith('$') || v === 'my_app_url') return true;
+    return placeholders.includes(v) || v.includes("your_") || v.includes("<") || v.includes("[") || v.length < 5;
   };
 
   const getFirstValid = (...candidates: (string | undefined)[]) => {
@@ -34,43 +36,28 @@ const validateEnv = () => {
     return fallback;
   };
 
-  const razorKeyId = getFirstValid(process.env.RAZORPAY_KEY_ID, process.env.VITE_RAZORPAY_KEY_ID, process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID);
-  const razorSecret = getFirstValid(process.env.RAZORPAY_KEY_SECRET, process.env.VITE_RAZORPAY_KEY_SECRET, process.env.NEXT_PUBLIC_RAZORPAY_KEY_SECRET);
   const supabaseUrl = getFirstValid(process.env.SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.VITE_SUPABASE_URL);
   const supabaseServiceKey = getFirstValid(process.env.SUPABASE_SERVICE_ROLE_KEY, process.env.SUPABASE_ANON_KEY, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY, process.env.VITE_SUPABASE_ANON_KEY);
-
-  // Swap Detection: Check if keys are accidentally swapped
-  if (razorKeyId?.startsWith('https://') && supabaseUrl?.startsWith('rzp_')) {
-    return { valid: false, field: "RAZORPAY & SUPABASE", reason: "Detection: It appears your Razorpay Key ID and Supabase URL have been swapped. Please correct them in Settings (Secrets)." };
-  }
-
-  if (razorKeyId?.startsWith('https://')) {
-    return { valid: false, field: "RAZORPAY_KEY_ID", reason: "Detection: Your RAZORPAY_KEY_ID starts with 'https://'. It looks like you might have pasted a Supabase URL here." };
-  }
-
-  if (!isPlaceholder(razorKeyId) && !razorKeyId?.startsWith('rzp_')) {
-    // Check if they put the secret in the ID field (Secrets usually don't have prefixes and are long)
-    if (razorKeyId && razorKeyId.length > 20 && !razorKeyId.includes('_')) {
-       return { valid: false, field: "RAZORPAY_KEY_ID", reason: "Format Error: The Key ID provided looks like an API Secret. Key IDs must start with 'rzp_'. Did you swap them?" };
-    }
-    return { valid: false, field: "RAZORPAY_KEY_ID", reason: "The Key ID format is invalid. It must start with 'rzp_'. Please verify your Razorpay credentials." };
-  }
+  const instamojoApiKey = getFirstValid(process.env.INSTAMOJO_API_KEY);
 
   if (!isPlaceholder(supabaseUrl) && (!supabaseUrl?.startsWith('https://') || !supabaseUrl?.includes('.supabase.co'))) {
     return { valid: false, field: "SUPABASE_URL", reason: "The Supabase URL format is invalid. It must start with 'https://' and include '.supabase.co'." };
   }
 
-  if (supabaseUrl?.includes('firebase') || supabaseUrl?.includes('AIzaSy') || razorKeyId?.startsWith('AIzaSy')) {
-    return { valid: false, field: "MIXUP_DETECTED", reason: "A Firebase API key was detected in a Supabase or Razorpay field. Please ensure you haven't swapped your keys." };
+  if (supabaseUrl?.includes('firebase') || supabaseUrl?.includes('AIzaSy')) {
+    return { valid: false, field: "MIXUP_DETECTED", reason: "A Firebase API key was detected in a Supabase field. Please ensure you haven't swapped your keys." };
+  }
+
+  if (isPlaceholder(instamojoApiKey)) {
+    console.error("Missing Instamojo API Key");
   }
 
   return { 
     valid: true, 
     keys: { 
-      razorKeyId: isPlaceholder(razorKeyId) ? undefined : razorKeyId,
-      razorSecret: isPlaceholder(razorSecret) ? undefined : razorSecret,
       supabaseUrl: isPlaceholder(supabaseUrl) ? undefined : supabaseUrl,
-      supabaseServiceKey: isPlaceholder(supabaseServiceKey) ? undefined : supabaseServiceKey
+      supabaseServiceKey: isPlaceholder(supabaseServiceKey) ? undefined : supabaseServiceKey,
+      instamojoApiKey: isPlaceholder(instamojoApiKey) ? undefined : instamojoApiKey
     } 
   };
 };
@@ -81,61 +68,6 @@ if (!envCheck.valid) {
   console.error(`CRITICAL CONFIG ERROR: ${envCheck.reason} in ${envCheck.field}`);
 }
 
-// Load Firebase Config
-let firebaseAppletConfig: any = null;
-try {
-  const configPath = path.join(process.cwd(), "firebase-applet-config.json");
-  if (fs.existsSync(configPath)) {
-    firebaseAppletConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
-  }
-} catch (error) {
-  console.warn("Could not load firebase-applet-config.json");
-}
-
-// Initialize Firebase Admin
-if (!admin.apps.length) {
-  try {
-    const sa = process.env.FIREBASE_SERVICE_ACCOUNT;
-    const projectId = firebaseAppletConfig?.projectId || process.env.FIREBASE_PROJECT_ID;
-    
-    if (sa && sa.trim().startsWith('{')) {
-      const serviceAccount = JSON.parse(sa);
-      console.log(`[Firebase] Initializing with Service Account for project: ${serviceAccount.project_id}`);
-      admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount),
-        projectId: serviceAccount.project_id
-      });
-    } else {
-      console.log(`[Firebase] Initializing with Default Credentials for project: ${projectId || 'auto-detect'}`);
-      admin.initializeApp({
-        projectId: projectId
-      });
-    }
-  } catch (error) {
-    console.error("[Firebase] Admin initialization critical failure:", error);
-  }
-}
-
-let db: admin.firestore.Firestore | null = null;
-try {
-  const dbId = firebaseAppletConfig?.firestoreDatabaseId;
-  const app = admin.app();
-  
-  if (dbId && dbId !== "(default)") {
-    console.log(`[Firestore] Attempting to use named database: ${dbId}`);
-    db = getFirestore(app, dbId);
-  } else {
-    console.log("[Firestore] Using default database");
-    db = getFirestore(app);
-  }
-} catch (error) {
-  console.error("[Firestore] Primary initialization failed, falling back to default:", error);
-  try {
-    db = getFirestore(admin.app());
-  } catch (fallbackError) {
-    console.error("[Firestore] Critical: All initialization attempts failed:", fallbackError);
-  }
-}
 const parser = new Parser();
 import { createClient } from "@supabase/supabase-js";
 
@@ -153,7 +85,9 @@ const getSupabase = () => {
   return supabaseClient;
 };
 
-const genAI = new GoogleGenAI({ apiKey: process.env.GOOGLE_GENAI_API_KEY || process.env.VINTAGE_ORACLE_KEY || "" });
+const genAI = new GoogleGenAI({ 
+  apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_GENAI_API_KEY || process.env.VINTAGE_ORACLE_KEY || "" 
+});
 
 // Rate Limiting Middleware
 const rateLimits = new Map<string, { count: number, lastReset: number }>();
@@ -479,10 +413,11 @@ app.post("/api/news/archive", async (req, res) => {
     }
 
     let summary = content;
+    let analysis = null;
     
-    // If no content provided, scrape it
-    if (!summary) {
-      console.log(`[Archival] Fetching content for analysis: ${url}`);
+    // If no content provided, or to ensure high-quality analysis, scrape it
+    console.log(`[Archival] Fetching content for analysis: ${url}`);
+    try {
       const response = await axios.get(url, {
         headers: { 'User-Agent': 'Mozilla/5.0' },
         timeout: 5000
@@ -491,39 +426,57 @@ app.post("/api/news/archive", async (req, res) => {
       const bodyText = $('p').map((_, el) => $(el).text()).get().join(' ').slice(0, 5000);
       
       const prompt = `
-        As a Senior Scholar at the Imperial Academy, analyze this news archive and provide a concise, UPSC-aligned summary (max 3 paragraphs).
-        Highlight GS Paper relevance and key strategic implications.
+        As a Senior Scholar at the Imperial Academy, analyze this news archive.
+        Provide a structured UPSC-aligned analysis. 
         
+        Identification Rules:
+        - Identify GS Paper relevance (GS I, II, III, or IV).
+        - Extract 3-5 Prelims Facts (short, factual).
+        - Extract 3-5 Mains Dimensions (analytical).
+        - Provide a scholarly summary.
+
         Title: ${title}
         Article Text: ${bodyText}
+
+        Format JSON:
+        {
+          "summary": "Scholarly summary focused on core UPSC dimensions",
+          "gs_paper": "GS I" | "GS II" | "GS III" | "GS IV",
+          "prelims_facts": ["fact 1", "fact 2"],
+          "mains_dimensions": ["dimension 1", "dimension 2"]
+        }
       `;
       
       const aiResult = await genAI.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: [{ role: "user", parts: [{ text: prompt }] }],
+        config: { responseMimeType: "application/json" }
       });
       
-      summary = aiResult.text;
+      analysis = JSON.parse(aiResult.text || "{}");
+      if (analysis.summary) summary = analysis.summary;
+    } catch (scrapeError) {
+      console.warn("Analysis failed during archival, continuing with basic summary:", scrapeError);
     }
 
-    if (!db) throw new Error("Imperial Archives offline.");
+    const client = getSupabase();
+    if (!client) throw new Error("Imperial Archives offline.");
 
-    const docRef = await db.collection("users").doc(userId).collection("notes").add({
+    const { data: docData, error: archivalError } = await client.from("vault_items").insert({
       title: title || "Archived Chronicle",
       type: 'link',
       url: url,
       content: summary,
-      userId: userId,
-      folderId: null,
+      analysis: analysis,
+      user_id: userId,
+      folder_id: null,
       source: "Imperial News Desk",
-      createdAt: admin.firestore.FieldValue.serverTimestamp()
-    });
+      created_at: new Date().toISOString()
+    }).select().single();
 
-    res.json({ 
-      status: "success", 
-      id: docRef.id,
-      message: "Chronicle successfully consigned to the Vault." 
-    });
+    if (archivalError) throw archivalError;
+
+    res.json({ id: docData.id, analysis });
   } catch (error: any) {
     console.error("Archival Error:", error);
     res.status(500).json({ 
@@ -533,206 +486,57 @@ app.post("/api/news/archive", async (req, res) => {
   }
 });
 
-// Razorpay: Create Order
-app.post("/api/razorpay", rateLimiter, async (req, res) => {
-  // Requirement: Explicitly set JSON header first
-  res.setHeader('Content-Type', 'application/json');
-
+// App Entry: News Analysis Endpoint
+app.post("/api/news/analyze", rateLimiter, async (req, res) => {
   try {
-    const envStatus = validateEnv();
+    const { url, title, summary: existingSummary } = req.body;
+    if (!url) return res.status(400).json({ error: "Source URL required." });
+
+    console.log(`[Oracle] Analyzing news intel: ${url}`);
     
-    // Safety Shield Check
-    if (!envStatus.valid) {
-      console.error("[Imperial Treasury] Shield Active: Invalid Format Detected", envStatus);
-      return res.status(500).json({ 
-        status: "shield_active", 
-        reason: "Invalid Variable Format", 
-        field: envStatus.field,
-        detail: envStatus.reason
-      });
-    }
-
-    const { razorKeyId: keyId, razorSecret: keySecret } = envStatus.keys;
-
-    // Credential Debugger: Log partial key for verification without exposure
-    console.log('[Imperial Treasury] Using Key ID:', keyId?.substring(0, 8) + '...');
-
-    if (!keyId || !keySecret || keyId === "undefined" || keySecret === "undefined" || keyId === "rzp_test_mock") {
-      console.error("[Imperial Treasury] Configuration Missing: RAZORPAY_KEY_ID or SECRET is undefined or mock.");
-      return res.status(500).json({ 
-        error: "The Imperial Treasury is not configured. Please ensure specialized environment variables (RAZORPAY_KEY_ID & RAZORPAY_KEY_SECRET) are set in the Settings menu (Secrets).",
-        code: "CONFIG_ERROR"
-      });
-    }
-
-    const { amount, currency = "INR" } = req.body;
-    
-    if (!amount) {
-      return res.status(400).json({ 
-        error: "Tribute amount is required to initiate the scholarly commission.",
-        code: "INVALID_AMOUNT"
-      });
-    }
-
-    // Authentication Fix: Handle BAD_REQUEST_ERROR explicitly
-    let rzp;
-    try {
-      rzp = new Razorpay({
-        key_id: keyId,
-        key_secret: keySecret,
-      });
-    } catch (initErr: any) {
-      console.error("[Imperial Treasury] Initialization Failed:", initErr);
-      return res.status(401).json({ 
-        error: "Invalid Razorpay Keys. Check Vercel Environment Variables.",
-        code: "AUTH_FAILURE"
-      });
-    }
-
-    const options = {
-      amount: Math.round(amount * 100), // Razorpay expects paise
-      currency,
-      receipt: `scholar_receipt_${Date.now()}`,
-    };
-    
-    try {
-      const order = await rzp.orders.create(options);
-      if (!order) {
-        throw new Error("Razorpay failed to return an order object.");
-      }
-      return res.status(200).json({ ...order, key: keyId });
-    } catch (orderErr: any) {
-      // Check for Authentication failed in ordering process
-      const errStr = JSON.stringify(orderErr).toLowerCase();
-      if (errStr.includes("authentication failed") || orderErr.statusCode === 401) {
-        return res.status(401).json({ 
-          error: "Invalid Razorpay Keys. Check Vercel Environment Variables.",
-          code: "AUTH_FAILURE"
-        });
-      }
-      throw orderErr;
-    }
-  } catch (error: any) {
-    console.error("[Imperial Treasury] Payment Engine Failure:", error);
-    
-    let status = error.statusCode || 500;
-    let errorMessage = "The Imperial Treasury failed to initiate the transaction.";
-    let code = error.code || "PAYMENT_INIT_ERROR";
-    let description = error.description || error.message || "";
-
-    if (error.error && typeof error.error === 'object') {
-      description = error.error.description || description;
-      code = error.error.code || code;
-    }
-
-    const rawErrorStr = (description + " " + code).toLowerCase();
-    
-    // Error Catching: specific requirement for Authentication failures
-    if (rawErrorStr.includes("authentication failed") || code === "BAD_REQUEST_ERROR" || status === 401) {
-      return res.status(401).json({ 
-        error: "Invalid Razorpay Keys. Check Vercel Environment Variables.",
-        code: "AUTH_FAILURE"
-      });
-    }
-
-    if (rawErrorStr.includes("malformed") || code === "MALFORMED_KEY") {
-      errorMessage = "Malformed Key: Your Razorpay Key ID should usually start with 'rzp_'.";
-      code = "CONFIG_ERROR";
-    } else if (description) {
-      errorMessage = description;
-    }
-
-    return res.status(status).json({ 
-      error: errorMessage,
-      code: code,
-      description: description || errorMessage
-    });
-  }
-});
-
-// Alias for backwards compatibility
-app.post("/api/create-order", (req, res) => {
-  // @ts-ignore
-  return app._router.handle(req, res, () => {});
-});
-
-// Razorpay: Webhook
-app.post("/api/webhook/razorpay", async (req, res) => {
-  try {
-    const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
-    
-    if (!secret) {
-      console.error("[Razorpay Webhook] Missing Secret. Verification failed.");
-      return res.status(500).json({ success: false, error: "Webhook configuration missing." });
-    }
-
-    const hmac = crypto.createHmac("sha256", secret);
-    hmac.update(JSON.stringify(req.body));
-    const digest = hmac.digest("hex");
-
-    if (digest !== req.headers["x-razorpay-signature"]) {
-      console.error("[Razorpay Webhook] Signature verification mismatch.");
-      return res.status(400).json({ success: false, error: "Imperial Guard rejected invalid signature." });
-    }
-
-    const { event, payload } = req.body;
-    const entity = payload.payment.entity;
-    const userId = entity.notes?.userId;
-    const planId = entity.notes?.planId;
-
-    if (event === "payment.captured" && userId) {
+    let bodyText = existingSummary || "";
+    if (url.startsWith('http')) {
       try {
-        console.log(`[Razorpay Webhook] Processing successful payment for user: ${userId}`);
-        
-        const updateData = {
-          subscriptionStatus: 'premium',
-          rank: 'Imperial Scholar', // Setting rank as requested
-          planId: planId,
-          lastPaymentId: entity.id,
-          updatedAt: new Date().toISOString()
-        };
-
-        // Update Firestore
-        if (db) {
-          await db.collection("users").doc(userId).set(updateData, { merge: true });
-          console.log(`[Firestore] User ${userId} upgraded to Imperial Scholar.`);
-        }
-
-        // Update Supabase
-        const supabase = getSupabase();
-        if (supabase) {
-          const { error: supabaseError } = await supabase
-            .from('user_profiles')
-            .update({ 
-              subscription_status: 'premium',
-              rank: 'Imperial Scholar',
-              plan_id: planId,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', userId);
-          
-          if (supabaseError) {
-            console.warn("[Supabase] Partial failure updating user_profiles, retrying users table...");
-            await supabase
-              .from('users')
-              .update({ 
-                subscription_status: 'premium',
-                rank: 'Imperial Scholar' 
-              })
-              .eq('id', userId);
-          }
-          console.log(`[Supabase] User ${userId} upgraded and rank synchronized.`);
-        }
-
-      } catch (error: any) {
-        console.error("[Webhook] Database Sync Failed:", error);
+        const response = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 5000 });
+        const $ = cheerio.load(response.data);
+        bodyText = $('p').map((_, el) => $(el).text()).get().join(' ').slice(0, 5000);
+      } catch (e) {
+        console.warn("Scrape failed for analysis, using fallback summary.");
       }
     }
 
-    res.json({ status: "ok" });
+    const prompt = `
+      As a Senior UPSC Mentor, analyze this news intel for a serious aspirant.
+      Provide a deep analysis suitable for UPSC GS preparation.
+      
+      Article Title: ${title}
+      Context: ${bodyText}
+
+      Requirements:
+      1. Scholarly Summary (max 200 words).
+      2. GS Paper Relevance (GS I-IV).
+      3. Prelims Focus Facts (Key data points for MCQ).
+      4. Mains Critical Dimensions (Analytical points for descriptive answers).
+
+      Format JSON MUST:
+      {
+        "summary": "...",
+        "gs_paper": "...",
+        "prelims_facts": ["...", "..."],
+        "mains_dimensions": ["...", "..."]
+      }
+    `;
+
+    const aiResult = await genAI.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      config: { responseMimeType: "application/json" }
+    });
+
+    res.json(JSON.parse(aiResult.text || "{}"));
   } catch (error: any) {
-    console.error("[Webhook] Critical failure:", error);
-    res.status(500).json({ success: false, error: "Imperial Webhook Engine failed." });
+    console.error("Analysis Error:", error);
+    res.status(500).json({ error: "The Oracle is currently silent. Connectivity issue or API exhaustion." });
   }
 });
 
@@ -765,145 +569,7 @@ app.post("/api/system/provision-storage", (req, res) => {
   }
 });
 
-// Firebase Custom Token for Supabase Users
-app.post("/api/auth/firebase-token", async (req, res) => {
-  try {
-    const { uid, email, displayName } = req.body;
-    
-    if (!uid) {
-      return res.status(400).json({ 
-        success: false, 
-        error: "UID (Imperial Identity) is required to issue a custom token.",
-        code: "IDENTITY_REQUIRED"
-      });
-    }
-
-    if (!admin.apps.length) {
-      throw new Error("Imperial Auth Engine is offline (Firebase Admin not initialized).");
-    }
-
-    console.log(`[Imperial Auth] Projecting Firebase Identity for Supabase UID: ${uid}`);
-    
-    const customToken = await admin.auth().createCustomToken(uid, {
-      email,
-      displayName
-    });
-    
-    res.json({ 
-      success: true,
-      token: customToken,
-      message: "Imperial passage granted."
-    });
-  } catch (error: any) {
-    console.error("[Imperial Auth] Token Generation Failure:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message || "The Imperial Vault denied token issuance.",
-      code: "TOKEN_GENERATION_FAILED"
-    });
-  }
-});
-
-// User Profile Proxy (Bypasses Firestore rules for Supabase users)
-app.get("/api/profile/:uid", async (req, res) => {
-  try {
-    const { uid } = req.params;
-    if (!db) {
-      return res.status(503).json({ success: false, error: "Imperial Archives offline (Database not initialized)." });
-    }
-    
-    const userDoc = await db.collection("users").doc(uid).get();
-    if (!userDoc.exists) {
-      return res.status(404).json({ success: false, error: "Imperial Scroll not found for this identity." });
-    }
-    res.json(userDoc.data());
-  } catch (error: any) {
-    console.error("[Imperial Profile] Fetch Error:", error);
-    res.status(500).json({ success: false, error: error.message || "Failed to retrieve Imperial profile." });
-  }
-});
-
-app.post("/api/profile/:uid", async (req, res) => {
-  const { uid } = req.params;
-  const data = req.body;
-  if (!db) return res.status(500).json({ error: "Database not initialized" });
-
-  try {
-    await db.collection("users").doc(uid).set({
-      ...data,
-      updatedAt: new Date().toISOString()
-    }, { merge: true });
-    res.json({ status: "success" });
-  } catch (error) {
-    console.error("Error updating profile:", error);
-    res.status(500).json({ error: "Failed to update profile" });
-  }
-});
-
-// Proxy for sub-collections
-app.get("/api/user-data/:uid/:collection", async (req, res) => {
-  const { uid, collection } = req.params;
-  if (!db) return res.status(500).json({ error: "Database not initialized" });
-
-  try {
-    const snapshot = await db.collection("users").doc(uid).collection(collection).get();
-    const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    res.json(items);
-  } catch (error) {
-    console.error(`Error fetching ${collection}:`, error);
-    res.status(500).json({ error: `Failed to fetch ${collection}` });
-  }
-});
-
-app.post("/api/user-data/:uid/:collection", async (req, res) => {
-  const { uid, collection } = req.params;
-  const data = req.body;
-  if (!db) return res.status(500).json({ error: "Database not initialized" });
-
-  try {
-    const docRef = await db.collection("users").doc(uid).collection(collection).add({
-      ...data,
-      createdAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp()
-    });
-    res.json({ id: docRef.id });
-  } catch (error) {
-    console.error(`Error creating ${collection}:`, error);
-    res.status(500).json({ error: `Failed to create ${collection}` });
-  }
-});
-
-app.put("/api/user-data/:uid/:collection/:id", async (req, res) => {
-  const { uid, collection, id } = req.params;
-  const data = req.body;
-  if (!db) return res.status(500).json({ error: "Database not initialized" });
-
-  try {
-    await db.collection("users").doc(uid).collection(collection).doc(id).set({
-      ...data,
-      updatedAt: FieldValue.serverTimestamp()
-    }, { merge: true });
-    res.json({ status: "success" });
-  } catch (error) {
-    console.error(`Error updating ${collection}:`, error);
-    res.status(500).json({ error: `Failed to update ${collection}` });
-  }
-});
-
-app.delete("/api/user-data/:uid/:collection/:id", async (req, res) => {
-  const { uid, collection, id } = req.params;
-  if (!db) return res.status(500).json({ error: "Database not initialized" });
-
-  try {
-    await db.collection("users").doc(uid).collection(collection).doc(id).delete();
-    res.json({ status: "success" });
-  } catch (error) {
-    console.error(`Error deleting ${collection}:`, error);
-    res.status(500).json({ error: `Failed to delete ${collection}` });
-  }
-});
-
-// API: Community Trending Summary
+// Community Trending Summary
 app.post("/api/community/summarize", rateLimiter, async (req, res) => {
   try {
     const { messages } = req.body;
@@ -991,41 +657,15 @@ app.listen(PORT, "0.0.0.0", async () => {
         }
     }, 60000); // Check every minute
     
-    if (db) {
+    const client = getSupabase();
+    if (client) {
       try {
         console.log("[Imperial Server] Auditing News Archives...");
         
-        let localDb = db;
-        let snapshot;
-        try {
-          snapshot = await localDb.collection("newsArticles").limit(1).get();
-        } catch (dbErr: any) {
-          const errMsg = dbErr.message || "";
-          if (errMsg.includes('PERMISSION_DENIED') || errMsg.includes('NOT_FOUND') || dbErr.code === 5 || dbErr.code === 7) {
-            // Silently fall back to default database if named instance is missing or restricted
-            localDb = getFirestore(admin.app());
-            db = localDb;
-            try {
-              snapshot = await localDb.collection("newsArticles").limit(1).get();
-            } catch (fallbackErr) {
-              // Both attempts failed, archives are likely truly empty or uninitialized
-            }
-          }
-        }
-
-        const client = getSupabase();
-        let supabaseEmpty = true;
-        if (client) {
-          try {
-            const { data } = await client.from('daily_news').select('id').limit(1);
-            supabaseEmpty = !data || data.length === 0;
-          } catch (supaErr) {
-            // Supabase connection warning (optional)
-          }
-        }
+        const { data } = await client.from('daily_news').select('id').limit(1);
+        const supabaseEmpty = !data || data.length === 0;
         
-        const vaultEmpty = !snapshot || snapshot.empty;
-        if (vaultEmpty || supabaseEmpty) {
+        if (supabaseEmpty) {
           console.log("[Imperial Server] News archives empty or incomplete. Initiating background reconnaissance...");
           syncNews().catch(err => console.error("Initial background sync failed:", err));
         } else {
@@ -1035,8 +675,7 @@ app.listen(PORT, "0.0.0.0", async () => {
         // High level warning instead of hard crash
         console.warn("[Imperial Server] Initial news reconnaissance check bypassed.");
       }
-    }
- else {
+    } else {
       console.warn("[Imperial Server] Database not initialized. Some features may be offline.");
     }
   });

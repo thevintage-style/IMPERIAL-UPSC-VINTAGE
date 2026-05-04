@@ -1,15 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { User as FirebaseUser } from 'firebase/auth';
 import { User as SupabaseUser } from '@supabase/supabase-js';
+import { supabase } from '../lib/supabase';
 import { Sparkles, Send, Bot, User as UserIcon, Loader2, X, MessageCircle, Minimize2 } from 'lucide-react';
 import { Button } from './ui/button';
 import { GoogleGenAI } from '@google/genai';
 import ReactMarkdown from 'react-markdown';
-import { db, collection, getDocs, query, orderBy, limit } from '../lib/firebase';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface OracleFloatingProps {
-  user: FirebaseUser | SupabaseUser;
+  user: SupabaseUser;
 }
 
 export function OracleFloating({ user }: OracleFloatingProps) {
@@ -30,13 +29,16 @@ export function OracleFloating({ user }: OracleFloatingProps) {
 
   const fetchContext = async () => {
     try {
-      const q = query(collection(db, 'newsArticles'), orderBy('createdAt', 'desc'), limit(5));
-      const snapshot = await getDocs(q);
-      return snapshot.docs.map(doc => {
-        const data = doc.data();
-        return `Title: ${data.title}\nSummary: ${data.summary}`;
-      }).join('\n\n');
+      const { data, error } = await supabase
+        .from('news_articles')
+        .select('title, summary')
+        .order('created_at', { ascending: false })
+        .limit(5);
+      
+      if (error) throw error;
+      return data.map(item => `Title: ${item.title}\nSummary: ${item.summary}`).join('\n\n');
     } catch (error) {
+      console.error("Context retrieval failed:", error);
       return "";
     }
   };
