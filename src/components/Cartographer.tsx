@@ -5,7 +5,6 @@ import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { Search, Navigation, Info, Sparkles, MapPin, Compass, Layers, Wind, Droplets, Mountain, Save, Edit3, Loader2 } from 'lucide-react';
 import { Button } from './ui/button';
-import { GoogleGenAI } from '@google/genai';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from '../lib/supabase';
 import ReactMarkdown from 'react-markdown';
@@ -199,50 +198,34 @@ export function Cartographer({ user }: CartographerProps) {
     setIsAnalyzing(true);
     const targetLat = lat ?? center[0];
     const targetLon = lon ?? center[1];
-    
-    // Guest Mode / Mock Data Fallback if API key is missing
-    const apiKey = process.env.VINTAGE_ORACLE_KEY || process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      setTimeout(() => {
-        setAnalysis(`
-### Strategic Intelligence (Guest Mode)
-**Location:** ${name || `${targetLat.toFixed(2)}, ${targetLon.toFixed(2)}`}
-
-**Geographic Overview:** This region features significant physiographic diversity, crucial for local climate and drainage patterns.
-**Strategic Importance:** Positioned as a key node for regional connectivity and security.
-**UPSC Relevance:** GS Paper I (Physical Geography) and GS Paper III (Internal Security).
-
-*Note: Connect your Oracle Key for deep-dive AI analysis.*
-        `.trim());
-        setIsAnalyzing(false);
-      }, 1000);
-      return;
-    }
 
     try {
-      const ai = new GoogleGenAI({ apiKey });
-      
-      const prompt = detailed 
-        ? `As a Senior UPSC Scholar and Strategic Analyst, provide an EXHAUSTIVE deep-dive analysis for the location at [${targetLat}, ${targetLon}] ${name ? `named ${name}` : ''}.
-           Cover the following in great detail:
-           1. PHYSIOGRAPHY: Detailed terrain, soil types, drainage patterns, and climatic influences.
-           2. STRATEGIC DEPTH: Military significance, border dynamics, and regional power play.
-           3. ECONOMIC GEOGRAPHY: Resource potential, infrastructure projects (Gati Shakti, etc.), and local industries.
-           4. HISTORICAL CONTEXT: Ancient to modern significance, relevant treaties, and cultural heritage.
-           5. UPSC SYLLABUS LINKAGE: Explicitly link to GS Paper I, II, and III topics.
-           Use a scholarly, sophisticated tone. Format with clear, bold headings and bullet points.`
-        : `As a UPSC Geography and Strategic Expert, analyze the location at coordinates [${targetLat}, ${targetLon}] ${name ? `named ${name}` : ''}. 
-           Provide a concise analysis (max 150 words) covering:
-           1. Geographic significance (rivers, terrain, climate).
-           2. Strategic/Security importance for India.
-           3. Historical or UPSC-relevant facts (GI tags, treaties, conflicts).
-           Format with clear headings.`;
-
-      const aiResult = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [{ role: "user", parts: [{ text: prompt }] }]
+      const response = await fetch('/api/oracle/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: detailed 
+            ? `As a Senior UPSC Scholar and Strategic Analyst, provide an EXHAUSTIVE deep-dive analysis for the location at [${targetLat}, ${targetLon}] ${name ? `named ${name}` : ''}.
+               Cover the following in great detail:
+               1. PHYSIOGRAPHY: Detailed terrain, soil types, drainage patterns, and climatic influences.
+               2. STRATEGIC DEPTH: Military significance, border dynamics, and regional power play.
+               3. ECONOMIC GEOGRAPHY: Resource potential, infrastructure projects (Gati Shakti, etc.), and local industries.
+               4. HISTORICAL CONTEXT: Ancient to modern significance, relevant treaties, and cultural heritage.
+               5. UPSC SYLLABUS LINKAGE: Explicitly link to GS Paper I, II, and III topics.
+               Use a scholarly, sophisticated tone. Format with clear, bold headings and bullet points.`
+            : `As a UPSC Geography and Strategic Expert, analyze the location at coordinates [${targetLat}, ${targetLon}] ${name ? `named ${name}` : ''}. 
+               Provide a concise analysis (max 150 words) covering:
+               1. Geographic significance (rivers, terrain, climate).
+               2. Strategic/Security importance for India.
+               3. Historical or UPSC-relevant facts (GI tags, treaties, conflicts).
+               Format with clear headings.`,
+          systemInstruction: "You are the Imperial Cartographer Analysis Engine."
+        })
       });
-      setAnalysis(aiResult.text || "The Imperial archives are temporarily inaccessible.");
+
+      if (!response.ok) throw new Error("Oracle failed to respond.");
+      const data = await response.json();
+      setAnalysis(data.text || "The Imperial archives are temporarily inaccessible.");
     } catch (error) {
       console.error("Analysis failed", error);
       setAnalysis("The Imperial archives are temporarily inaccessible. Please try again.");

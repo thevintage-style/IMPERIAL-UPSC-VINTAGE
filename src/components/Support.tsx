@@ -4,7 +4,6 @@ import { supabase } from '../lib/supabase';
 import { Send, MessageSquare, Heart, Phone, Mail, Sparkles, User as UserIcon, Shield, Zap } from 'lucide-react';
 import { Button } from './ui/button';
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenAI } from "@google/genai";
 
 interface SupportProps {
   user: SupabaseUser;
@@ -20,7 +19,6 @@ export function Support({ user }: SupportProps) {
   const [chatId, setChatId] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const ai = new GoogleGenAI({ apiKey: process.env.VINTAGE_ORACLE_KEY || "" });
 
   const handleReportBug = async () => {
     if (!ticketIssue.trim()) return;
@@ -148,44 +146,30 @@ export function Support({ user }: SupportProps) {
       // AI Response Logic
       setIsAIThinking(true);
 
-      if (!process.env.VINTAGE_ORACLE_KEY) {
-        setTimeout(async () => {
-          const aiText = "The Grand Vizier is currently in a deep meditative state (Guest Mode). While the Imperial Oracle Key is missing, I can still offer basic guidance on your journey. How may I assist you with the archives today?";
-          await supabase
-            .from('support_messages')
-            .insert([{
-              chat_id: chatId,
-              sender_id: 'ai-assistant',
-              sender_role: 'ai',
-              text: aiText,
-              created_at: new Date().toISOString()
-            }]);
-          setIsAIThinking(false);
-        }, 1000);
-        return;
-      }
-
-      const prompt = `You are the Grand Vizier of the Imperial Scholar Platform, a legendary UPSC strategist. 
-      A student is seeking your guidance.
-      
-      Student Query: "${text}"
-      
-      Your task:
-      1. Provide a highly strategic, analytical response focused on UPSC preparation (Prelims, Mains, or Interview).
-      2. Use a tone that is authoritative yet encouraging, scholarly, and "Imperial".
-      3. If they ask about a specific subject, give them a "Vizier's Tip" on how to approach it.
-      4. Keep the response under 150 words.
-      
-      Structure your response with:
-      - A scholarly greeting.
-      - Strategic analysis.
-      - A concluding word of wisdom.`;
-
-      const aiResult = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [{ role: "user", parts: [{ text: prompt }] }]
+      const response = await fetch('/api/oracle/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: text,
+          systemInstruction: `You are the Grand Vizier of the Imperial Scholar Platform, a legendary UPSC strategist. 
+          A student is seeking your guidance.
+          
+          Your task:
+          1. Provide a highly strategic, analytical response focused on UPSC preparation (Prelims, Mains, or Interview).
+          2. Use a tone that is authoritative yet encouraging, scholarly, and "Imperial".
+          3. If they ask about a specific subject, give them a "Vizier's Tip" on how to approach it.
+          4. Keep the response under 150 words.
+          
+          Structure your response with:
+          - A scholarly greeting.
+          - Strategic analysis.
+          - A concluding word of wisdom.`
+        })
       });
-      const aiText = aiResult.text || "The Grand Vizier is currently indisposed.";
+
+      if (!response.ok) throw new Error("Oracle failed to respond.");
+      const data = await response.json();
+      const aiText = data.text || "The Grand Vizier is currently indisposed.";
 
       await supabase
         .from('support_messages')

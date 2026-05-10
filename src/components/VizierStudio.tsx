@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { User as SupabaseUser } from '@supabase/supabase-js';
-import { GoogleGenAI } from "@google/genai";
 import { Terminal, Sparkles, Send, Code, Cpu, Zap, History, RefreshCw, X } from 'lucide-react';
 import { Button } from './ui/button';
 import { motion, AnimatePresence } from 'motion/react';
@@ -15,8 +14,6 @@ export function VizierStudio({ user }: VizierStudioProps) {
   const [responses, setResponses] = useState<{ role: 'user' | 'vizier', content: string }[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
-
-  const ai = new GoogleGenAI({ apiKey: process.env.VINTAGE_ORACLE_KEY || "" });
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -36,30 +33,24 @@ export function VizierStudio({ user }: VizierStudioProps) {
     setResponses(prev => [...prev, { role: 'user', content: userPrompt }]);
     setIsProcessing(true);
     
-    if (!process.env.VINTAGE_ORACLE_KEY) {
-      setTimeout(() => {
-        setResponses(prev => [...prev, { role: 'vizier', content: "The Imperial Forge is currently in **Safe Mode** (Guest Mode). While the Oracle Key is missing, I can still discuss architectural concepts, but I cannot forge new AI-driven logic at this time.\n\n*Tip: Ask me about the Parchment Design System!*" }]);
-        setIsProcessing(false);
-      }, 1000);
-      return;
-    }
-
     try {
-      const aiResult = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [{ role: "user", parts: [{ text: `
-          You are the Grand Vizier, a master architect and AI assistant for the Imperial UPSC Portal.
+      const response = await fetch('/api/oracle/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: userPrompt,
+          systemInstruction: `You are the Grand Vizier, a master architect and AI assistant for the Imperial UPSC Portal.
           The user is a developer or owner asking for technical advice, code snippets, or feature ideas.
-          Maintain a scholarly, vintage, yet highly technical persona.
-          
-          User Request: ${userPrompt}
-        ` }] }]
+          Maintain a scholarly, vintage, yet highly technical persona.`
+        })
       });
-      
-      setResponses(prev => [...prev, { role: 'vizier', content: aiResult.text || "" }]);
+
+      if (!response.ok) throw new Error("Oracle failed to respond.");
+      const data = await response.json();
+      setResponses(prev => [...prev, { role: 'vizier', content: data.text || "" }]);
     } catch (error) {
       console.error("Vizier Studio Error:", error);
-      setResponses(prev => [...prev, { role: 'vizier', content: "The Imperial conduits are currently congested. Please try again later." }]);
+      setResponses(prev => [...prev, { role: 'vizier', content: "The Imperial conduits are currently congested. Please try again later. Ensure your Oracle keys are properly consigned." }]);
     } finally {
       setIsProcessing(false);
     }
@@ -88,15 +79,21 @@ export function VizierStudio({ user }: VizierStudioProps) {
         Use markdown for formatting.
       `;
 
-      const result = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [{ role: "user", parts: [{ text: analysisPrompt }] }]
+      const response = await fetch('/api/oracle/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: analysisPrompt,
+          systemInstruction: "You are the Grand Vizier Analysis Engine."
+        })
       });
 
-      setAnalysisResult(result.text || "The analysis yielded no insights.");
+      if (!response.ok) throw new Error("Analysis failed.");
+      const data = await response.json();
+      setAnalysisResult(data.text || "The analysis yielded no insights.");
     } catch (error) {
       console.error("Analysis Error:", error);
-      setAnalysisResult("The analysis was interrupted by a spectral disturbance.");
+      setAnalysisResult("The analysis was interrupted by a spectral disturbance. Check your credentials.");
     } finally {
       setIsAnalyzing(false);
     }

@@ -29,11 +29,10 @@ import {
 import { Button } from './ui/button';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
-import { GoogleGenAI } from "@google/genai";
 import { jsPDF } from "jspdf";
 import { getStroke } from 'perfect-freehand';
 
-const ai = new GoogleGenAI({ apiKey: process.env.VINTAGE_ORACLE_KEY || "" });
+const jsPDFInstance = jsPDF; // just to keep track of type if needed
 
 interface LogEntry {
   id?: string;
@@ -51,6 +50,8 @@ interface FolioProps {
 }
 
 export function Folio({ user }: FolioProps) {
+  if (!user) return null;
+
   const [activeModule, setActiveModule] = useState<'journal' | 'sheet' | 'canvas'>('journal');
   const [currentLog, setCurrentLog] = useState<LogEntry | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -235,12 +236,9 @@ export function Folio({ user }: FolioProps) {
   };
 
   const runAIAnalysis = async () => {
-    const apiKey = process.env.VINTAGE_ORACLE_KEY || process.env.GEMINI_API_KEY;
-    if (!apiKey || isAnalyzing) return;
+    if (!journalText || isAnalyzing) return;
     setIsAnalyzing(true);
     try {
-      const genAI = new GoogleGenAI({ apiKey });
-      
       const prompt = `As the Imperial Scholar, analyze this UPSC aspirant's daily log:
         Journal: ${journalText}
         Study Hours: ${sheetRows.map(r => `${r.time}: ${r.topic} (${r.status})`).join(', ')}
@@ -251,11 +249,18 @@ export function Folio({ user }: FolioProps) {
         3. A motivational quote from an Indian leader.
         Format as clean Markdown.`;
 
-      const aiResult = await genAI.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [{ role: "user", parts: [{ text: prompt }] }]
+      const response = await fetch('/api/oracle/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: prompt,
+          systemInstruction: "You are the Imperial Scholar Analysis Engine."
+        })
       });
-      const text = aiResult.text;
+
+      if (!response.ok) throw new Error("Oracle failed to respond.");
+      const data = await response.json();
+      const text = data.text;
       
       if (currentLog?.id) {
         await supabase
@@ -268,7 +273,7 @@ export function Folio({ user }: FolioProps) {
       setStatus({ type: 'success', message: "The Oracle has spoken. Analysis complete." });
     } catch (error) {
       console.error("AI Error:", error);
-      setStatus({ type: 'error', message: "The Oracle is silent. Check your connection." });
+      setStatus({ type: 'error', message: "The Oracle is silent. Check your connection and archives." });
     } finally {
       setIsAnalyzing(false);
     }

@@ -3,7 +3,6 @@ import { User as SupabaseUser } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { Sparkles, Send, Bot, User as UserIcon, Loader2, X, MessageCircle, Minimize2 } from 'lucide-react';
 import { Button } from './ui/button';
-import { GoogleGenAI } from '@google/genai';
 import ReactMarkdown from 'react-markdown';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -53,20 +52,22 @@ export function OracleFloating({ user }: OracleFloatingProps) {
 
     try {
       const context = await fetchContext();
-      const ai = new GoogleGenAI({ apiKey: process.env.VINTAGE_ORACLE_KEY || '' });
       
-      const aiResult = await ai.models.generateContent({ 
-        model: "gemini-3-flash-preview",
-        config: {
+      const response = await fetch('/api/oracle/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: userMsg,
           systemInstruction: `You are a world-class UPSC (Civil Services) mentor. Your tone is scholarly, encouraging, and highly analytical. 
           Use the following recent news context if relevant:
           ${context}
           Always relate topics to the UPSC syllabus (GS I-IV). Use bullet points for clarity. Keep responses concise for a chat interface.`
-        },
-        contents: [{ role: "user", parts: [{ text: userMsg }] }]
+        })
       });
 
-      const responseText = aiResult.text;
+      if (!response.ok) throw new Error("Oracle failed to respond.");
+      const data = await response.json();
+      const responseText = data.text;
       setMessages(prev => [...prev, { role: 'bot', content: responseText || "The Oracle is momentarily clouded." }]);
     } catch (error) {
       setMessages(prev => [...prev, { role: 'bot', content: "A disturbance in the archives. Please try again." }]);

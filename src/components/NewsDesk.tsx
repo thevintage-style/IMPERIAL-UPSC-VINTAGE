@@ -21,7 +21,6 @@ import {
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { supabase } from '../lib/supabase';
-import { GoogleGenAI } from "@google/genai";
 import { motion, AnimatePresence } from 'motion/react';
 
 interface NewsDeskProps {
@@ -55,6 +54,8 @@ export function NewsDesk({ user }: NewsDeskProps) {
   const [savedArticles, setSavedArticles] = useState<Set<string>>(new Set());
   
   const isAdmin = user?.email === "raksha05jk.rao@gmail.com";
+
+  if (!user) return null;
 
   useEffect(() => {
     if (activeTab === 'daily') {

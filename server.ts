@@ -36,28 +36,36 @@ const validateEnv = () => {
     return fallback;
   };
 
-  const supabaseUrl = getFirstValid(process.env.SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.VITE_SUPABASE_URL);
-  const supabaseServiceKey = getFirstValid(process.env.SUPABASE_SERVICE_ROLE_KEY, process.env.SUPABASE_ANON_KEY, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY, process.env.VITE_SUPABASE_ANON_KEY);
+  const supabaseUrl = getFirstValid(process.env.SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.VITE_SUPABASE_URL, 'https://rqnviybagpwpqdtwlkae.supabase.co');
+  const supabaseServiceKey = getFirstValid(process.env.SUPABASE_SERVICE_ROLE_KEY, process.env.SUPABASE_ANON_KEY, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY, process.env.VITE_SUPABASE_ANON_KEY, 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJxbnZpeWJhZ3B3cHFkdHdsa2FlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwNzUxMTYsImV4cCI6MjA5MTY1MTExNn0.YygpCrhbsBG2b3nOvpxF9MWoH7KUs00Rej-0NFRErA8');
   const instamojoApiKey = getFirstValid(process.env.INSTAMOJO_API_KEY);
+  const oracleKey = getFirstValid(process.env.VINTAGE_ORACLE_KEY, process.env.GEMINI_API_KEY, process.env.GOOGLE_GENAI_API_KEY);
+  
+  if (isPlaceholder(oracleKey)) {
+    console.warn("[Imperial Oracle] No valid Gemini API key found. AI features will fail.");
+  }
 
-  if (!isPlaceholder(supabaseUrl) && (!supabaseUrl?.startsWith('https://') || !supabaseUrl?.includes('.supabase.co'))) {
+  // Auto-fix: if user provided just the ref (e.g. rqnviybagpwpqdtwlkae.supabase.co)
+  let processedUrl = supabaseUrl;
+  if (processedUrl && !processedUrl.startsWith('http') && processedUrl.includes('.supabase.co')) {
+    processedUrl = `https://${processedUrl}`;
+  }
+
+  if (!isPlaceholder(processedUrl) && (!processedUrl?.startsWith('https://') || !processedUrl?.includes('.supabase.co'))) {
     return { valid: false, field: "SUPABASE_URL", reason: "The Supabase URL format is invalid. It must start with 'https://' and include '.supabase.co'." };
   }
 
-  if (supabaseUrl?.includes('firebase') || supabaseUrl?.includes('AIzaSy')) {
+  if (processedUrl?.includes('firebase') || processedUrl?.includes('AIzaSy')) {
     return { valid: false, field: "MIXUP_DETECTED", reason: "A Firebase API key was detected in a Supabase field. Please ensure you haven't swapped your keys." };
-  }
-
-  if (isPlaceholder(instamojoApiKey)) {
-    console.error("Missing Instamojo API Key");
   }
 
   return { 
     valid: true, 
     keys: { 
-      supabaseUrl: isPlaceholder(supabaseUrl) ? undefined : supabaseUrl,
+      supabaseUrl: isPlaceholder(processedUrl) ? undefined : processedUrl,
       supabaseServiceKey: isPlaceholder(supabaseServiceKey) ? undefined : supabaseServiceKey,
-      instamojoApiKey: isPlaceholder(instamojoApiKey) ? undefined : instamojoApiKey
+      instamojoApiKey: isPlaceholder(instamojoApiKey) ? undefined : instamojoApiKey,
+      oracleKey: isPlaceholder(oracleKey) ? undefined : oracleKey
     } 
   };
 };
@@ -86,8 +94,37 @@ const getSupabase = () => {
 };
 
 const genAI = new GoogleGenAI({ 
-  apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_GENAI_API_KEY || process.env.VINTAGE_ORACLE_KEY || "" 
+  apiKey: envCheck.keys?.oracleKey || ""
 });
+
+// Advanced Error Handling for Gemini API
+const safeGenerateContent = async (options: { model: string, contents: any[], config?: any }, retries = 2): Promise<any> => {
+  try {
+    return await genAI.models.generateContent(options);
+  } catch (err: any) {
+    const errorMsg = err.message || JSON.stringify(err);
+    
+    // Handle Rate Limits (429)
+    if (errorMsg.includes("429") || errorMsg.includes("Quota exceeded") || errorMsg.includes("RESOURCE_EXHAUSTED")) {
+      if (retries > 0) {
+        console.warn(`[Imperial Oracle] Quota exceeded. Waiting before retry... (${retries} left)`);
+        await new Promise(resolve => setTimeout(resolve, 20000)); // Wait 20 seconds for quota reset
+        return safeGenerateContent(options, retries - 1);
+      }
+      throw new Error("Imperial Oracle is exhausted. Please try again after 15-20 seconds.");
+    }
+    
+    // Handle Model Not Found (404)
+    if (errorMsg.includes("404") || errorMsg.includes("not found")) {
+      console.warn(`[Imperial Oracle] Model ${options.model} not available. Falling back to gemini-3-flash-preview.`);
+      if (options.model !== "gemini-3-flash-preview") {
+        return safeGenerateContent({ ...options, model: "gemini-3-flash-preview" }, retries);
+      }
+    }
+
+    throw err;
+  }
+};
 
 // Rate Limiting Middleware
 const rateLimits = new Map<string, { count: number, lastReset: number }>();
@@ -132,6 +169,24 @@ app.use(express.json());
    Columns: id (int8), user_id (uuid), subject (text), duration_minutes (int4), notes (text), date (timestamp)
 */
 
+// Robust JSON extraction helper
+const extractJson = (text: string) => {
+  try {
+    const trimmed = text.trim();
+    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+      return JSON.parse(trimmed);
+    }
+    const match = text.match(/\{[\s\S]*\}/);
+    if (match) {
+      return JSON.parse(match[0]);
+    }
+    throw new Error("No JSON block found");
+  } catch (e) {
+    console.warn("[Imperial Oracle] JSON Extraction failed. Content:", text.slice(0, 100));
+    return null;
+  }
+};
+
 const syncNews = async () => {
   try {
     console.log("Starting Imperial News Engine reconnaissance...");
@@ -139,9 +194,10 @@ const syncNews = async () => {
       { name: "Insights on India", url: "https://www.insightsonindia.com/feed/" },
       { name: "PMF IAS", url: "https://www.pmfias.com/feed/" },
       { name: "PIB", url: "https://pib.gov.in/RssMain.aspx?ModId=6" },
-      { name: "The Hindu", url: "https://www.thehindu.com/news/national/feeder/default.rss" },
-      { name: "Indian Express", url: "https://indianexpress.com/section/explained/feed/" }
+      { name: "The Hindu (National)", url: "https://www.thehindu.com/news/national/feeder/default.rss" }
     ];
+
+    const blacklist = ["election", "result", "victory", "defeat", "party", "modi", "rahul", "kerala", "west bengal", "surges ahead", "mandate", "congratulates", "bjp", "congress", "tmc", "cpim", "ldf", "udf", "mamata", "stalin", "pinarayi", "suvendu", "constituency", "votes", "polling", "ballot", "candidate", "wins in", "unseat", "newcomers"];
 
     let processedCount = 0;
 
@@ -155,50 +211,58 @@ const syncNews = async () => {
         console.log(`Fetching feed from ${source.name}...`);
         const response = await axios.get(source.url, {
           headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
           },
-          timeout: 10000
+          timeout: 15000
         });
         
         const feed = await parser.parseString(response.data);
-        // Process top 5 items per source
-        const items = feed.items.slice(0, 5);
+        const items = feed.items.slice(0, 8);
 
         for (const item of items) {
           try {
+            const title = (item.title || "").toLowerCase();
+            const snippet = (item.contentSnippet || "").toLowerCase();
+            
+            // Fast filter for political noise
+            if (blacklist.some(word => title.includes(word) || snippet.includes(word))) {
+              console.log(`[News Engine] Discarding political/election noise: ${item.title}`);
+              continue;
+            }
+
             // Scoring with Gemini
             const prompt = `
-              As a Senior UPSC Mentor and Strategic Intelligence Officer, analyze this news intel for high-fidelity relevance to the UPSC CSE Syllabus.
-              Identify if it links to GS Paper I (History/Geo), GS Paper II (Polity/IR), GS Paper III (Economy/Enviro/Security), or GS Paper IV (Ethics).
+              As a Senior UPSC Mentor, analyze this intel for UPSC relevance.
+              IGNORE ALL POLITICS, ELECTIONS, OR REGIONAL PARTY DISPUTES.
+              FOCUS ONLY ON: Administration, Bills, Economy, Environment, History, Culture, IR Strategy, Science, and Social Issues.
               
               Intel:
               Title: ${item.title}
               Summary: ${item.contentSnippet || item.content || item.title}
               
               Rules:
-              - Target relevance score of 1-10.
-              - Only score > 7 if the topic strongly involves key UPSC dimensions like: Constitutional, GS1, GS2, GS3, GS4, Prelims, Mains, or PIB.
-              - Discard articles that do not relate to these pillars.
-              - Provide a sophisticated, UPSC-ready summary.
+              - Target score 1-10.
+              - Score > 7 ONLY for core GS Pillars (GS1-4).
+              - Completely reject election results or political triviality.
               
               Format JSON:
               {
                 "score": number,
                 "gs_paper": "GS I" | "GS II" | "GS III" | "GS IV",
-                "summary": "Scholarly summary focusing on core UPSC dimensions",
+                "summary": "Scholarly summary for UPSC aspirants",
                 "is_worth_archiving": boolean
               }
             `;
 
-            const aiResult = await genAI.models.generateContent({
+            const aiResult = await safeGenerateContent({
               model: "gemini-3-flash-preview",
               contents: [{ role: "user", parts: [{ text: prompt }] }],
               config: { responseMimeType: "application/json" }
             });
             
-            const aiData = JSON.parse(aiResult.text || "{}");
+            const aiData = extractJson(aiResult.text || "{}");
 
-            if (aiData.score > 7) {
+            if (aiData && aiData.score > 7) {
               console.log(`[News Engine] High value intel discovered: ${item.title} (Score: ${aiData.score})`);
               
               // Store in Supabase daily_news
@@ -447,14 +511,14 @@ app.post("/api/news/archive", async (req, res) => {
         }
       `;
       
-      const aiResult = await genAI.models.generateContent({
+      const aiResult = await safeGenerateContent({
         model: "gemini-3-flash-preview",
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         config: { responseMimeType: "application/json" }
       });
       
-      analysis = JSON.parse(aiResult.text || "{}");
-      if (analysis.summary) summary = analysis.summary;
+      analysis = extractJson(aiResult.text || "{}");
+      if (analysis && analysis.summary) summary = analysis.summary;
     } catch (scrapeError) {
       console.warn("Analysis failed during archival, continuing with basic summary:", scrapeError);
     }
@@ -527,13 +591,15 @@ app.post("/api/news/analyze", rateLimiter, async (req, res) => {
       }
     `;
 
-    const aiResult = await genAI.models.generateContent({
+    const aiResult = await safeGenerateContent({
       model: "gemini-3-flash-preview",
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       config: { responseMimeType: "application/json" }
     });
 
-    res.json(JSON.parse(aiResult.text || "{}"));
+    const aiData = extractJson(aiResult.text || "{}");
+    if (!aiData) throw new Error("Oracle failed to generate valid intelligence analysis.");
+    res.json(aiData);
   } catch (error: any) {
     console.error("Analysis Error:", error);
     res.status(500).json({ error: "The Oracle is currently silent. Connectivity issue or API exhaustion." });
@@ -590,7 +656,7 @@ app.post("/api/community/summarize", rateLimiter, async (req, res) => {
       ${textToSummarize}
     `;
 
-    const aiResult = await genAI.models.generateContent({
+    const aiResult = await safeGenerateContent({
       model: "gemini-3-flash-preview",
       contents: [{ role: "user", parts: [{ text: prompt }] }],
     });
@@ -599,6 +665,26 @@ app.post("/api/community/summarize", rateLimiter, async (req, res) => {
   } catch (error: any) {
     console.error("Community Summary Error:", error);
     res.status(500).json({ error: "Failed to generate community summary." });
+  }
+});
+
+// Generic AI Chat Proxy: Securely calls Gemini via backend
+app.post("/api/oracle/chat", rateLimiter, async (req, res) => {
+  try {
+    const { prompt, systemInstruction } = req.body;
+    if (!prompt) return res.status(400).json({ error: "No prompt provided." });
+
+    const result = await safeGenerateContent({ 
+      model: "gemini-3-flash-preview",
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      config: {
+        systemInstruction: systemInstruction
+      }
+    });
+    res.json({ text: result.text });
+  } catch (error: any) {
+    console.error("Oracle Proxy Error:", error);
+    res.status(500).json({ error: "The Oracle is momentarily clouded. Connections failed." });
   }
 });
 

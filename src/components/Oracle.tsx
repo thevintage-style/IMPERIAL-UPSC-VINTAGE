@@ -3,7 +3,6 @@ import { User as SupabaseUser } from '@supabase/supabase-js';
 import { Sparkles, Send, Bot, User as UserIcon, Loader2, Info, Mic, MicOff, Volume2 } from 'lucide-react';
 import { Button } from './ui/button';
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenAI } from '@google/genai';
 import ReactMarkdown from 'react-markdown';
 import { supabase } from '../lib/supabase';
 
@@ -219,11 +218,12 @@ export function Oracle({ user, profile }: OracleProps) {
     
     try {
       const context = await fetchContext();
-      const ai = new GoogleGenAI({ apiKey: process.env.VINTAGE_ORACLE_KEY || '' });
       
-      const aiResult = await ai.models.generateContent({ 
-        model: "gemini-3-flash-preview",
-        config: {
+      const response = await fetch('/api/oracle/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: msgContent,
           systemInstruction: `You are Oracle, a high-level UPSC mentor. Use the provided context to guide the user.
           
           Current Affairs:
@@ -233,15 +233,18 @@ export function Oracle({ user, profile }: OracleProps) {
           ${userContext}
           
           Tone: Scholarly, encouraging, strategic. Reference GS papers where possible.`
-        },
-        contents: [{ role: "user", parts: [{ text: msgContent }] }]
+        })
       });
 
-      const responseText = aiResult.text;
+      if (!response.ok) throw new Error("Oracle failed to respond.");
+      const data = await response.json();
+      
+      const responseText = data.text;
       setMessages(prev => [...prev, { role: 'bot', content: responseText || "The Oracle is momentarily clouded." }]);
       if (responseText) speakText(responseText);
     } catch (error) {
-      setMessages(prev => [...prev, { role: 'bot', content: "A disturbance in the archives." }]);
+      console.error("Oracle Error:", error);
+      setMessages(prev => [...prev, { role: 'bot', content: "A disturbance in the archives. Please ensure your Imperial credentials are valid." }]);
     } finally {
       setIsLoading(false);
       setIsDeepListen(false);

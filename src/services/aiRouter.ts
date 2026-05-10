@@ -1,4 +1,3 @@
-import { GoogleGenAI } from "@google/genai";
 
 // Generic interface for AI routing
 export type ModelType = 'claude' | 'gemini' | 'gpt';
@@ -25,28 +24,18 @@ export async function routeAIRequest(request: AIRequest) {
   // If keys are missing, we fallback to Gemini as the reliable base
   
   try {
-    if (modelToUse === 'claude' && process.env.VINTAGE_CLAUDE_KEY) {
-      // Mocking Claude call structure - in real app would use @anthropic-ai/sdk
-      return await callClaude(prompt, context);
-    }
-    
-    if (modelToUse === 'gpt' && process.env.VINTAGE_GPT_KEY) {
-      // Mocking GPT call structure - in real app would use openai
-      return await callGPT(prompt, context);
-    }
+    const response = await fetch('/api/oracle/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: `System Instruction: You are the Imperial Oracle of the UPSC Portal. Provide scholarly, analytical, and authoritative guidance.\n\nUser Prompt: ${prompt}`,
+        systemInstruction: "You are the Imperial Oracle Router."
+      })
+    });
 
-      // Default to Gemini 1.5 Pro for high quality if available, else Flash
-      const genAI = new GoogleGenAI({ apiKey: process.env.VINTAGE_ORACLE_KEY || "" });
-      
-      const result = await genAI.models.generateContent({
-        model: "gemini-1.5-pro",
-        contents: [{ 
-          role: "user", 
-          parts: [{ text: `System Instruction: You are the Imperial Oracle of the UPSC Portal. Provide scholarly, analytical, and authoritative guidance.\n\nUser Prompt: ${prompt}` }] 
-        }]
-      });
-
-      return result.text;
+    if (!response.ok) throw new Error("Oracle proxy failed.");
+    const data = await response.json();
+    return data.text;
   } catch (error) {
     console.error("AI Routing Error:", error);
     // Ultimate fallback

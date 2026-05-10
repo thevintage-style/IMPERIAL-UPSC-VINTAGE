@@ -16,7 +16,6 @@ import {
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenAI } from "@google/genai";
 import { ReportModal } from './ReportModal';
 import ReactMarkdown from 'react-markdown';
 
@@ -180,19 +179,24 @@ export function Community({ user, isAdmin }: CommunityProps) {
 
   const filterMessage = async (text: string) => {
     try {
-      const apiKey = process.env.VINTAGE_ORACLE_KEY || process.env.GEMINI_API_KEY;
-      const ai = new GoogleGenAI({ apiKey: apiKey || "" });
-      const aiResult = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [{ role: "user", parts: [{ text: `
+      const response = await fetch('/api/oracle/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: `
           Analyze the following message for a UPSC study community. 
           If the message is related to UPSC, studies, current affairs, or general academic motivation, return "SAFE".
           If it is spam, offensive, or completely unrelated to studies, return "UNSAFE".
           
           Message: "${text}"
-        ` }] }]
+        `,
+          systemInstruction: "You are the Imperial Community Censor."
+        })
       });
-      return (aiResult.text || "").trim().toUpperCase().includes("SAFE");
+
+      if (!response.ok) throw new Error("Oracle failed to respond.");
+      const data = await response.json();
+      return (data.text || "").trim().toUpperCase().includes("SAFE");
     } catch (error) {
       console.error("AI Filter Error:", error);
       return true; // Default to safe if AI fails

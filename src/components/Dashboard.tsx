@@ -24,9 +24,24 @@ export function Dashboard({ user }: DashboardProps) {
   const [isLoading, setIsLoading] = useState(true);
 
   const userId = user.id;
+ const [userPlan, setUserPlan] = useState<string>('Loading...');
+
+  const fetchUserPlan = async () => {
+    try {
+      const { data } = await supabase
+        .from('profiles')
+        .select('plan_type')
+        .eq('id', userId)
+        .single();
+      if (data) setUserPlan(data.plan_type);
+    } catch (err) {
+      console.error('Error:', err);
+    }
+  };
 
   useEffect(() => {
     if (!userId) return;
+    fetchUserPlan();
 
     const fetchLogs = async () => {
       setIsLoading(true);
@@ -58,6 +73,9 @@ export function Dashboard({ user }: DashboardProps) {
     };
   }, [userId]);
 
+const handlePayment = (amount: number, planName: string) => {
+    window.location.href = `https://www.instamojo.com/@imperial_upsc/?amount=${amount}&intent=buy&detail=${planName}`;
+  };
   const addLog = async () => {
     if (!userId) return;
     try {
@@ -83,11 +101,26 @@ export function Dashboard({ user }: DashboardProps) {
     }
     return acc;
   }, []);
-
-  const COLORS = ['#8B4513', '#D4AF37', '#1A1612', '#5A5A40', '#4A4A30'];
+   const COLORS = ['#8B4513', '#D4AF37', '#1A1612', '#5A5A40', '#4A4A30'];
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      {/* Membership Status Bar */}
+      <div className="lg:col-span-3 flex justify-between items-center bg-white p-5 rounded-3xl border border-[#8B4513]/10 shadow-sm">
+        <div>
+          <p className="text-[10px] uppercase tracking-[2px] text-gray-400 font-bold mb-1">Membership Status</p>
+          <p className="text-xl font-serif font-bold text-[#8B4513] uppercase">{userPlan}</p>
+        </div>
+        <div className="flex gap-3">
+          <button onClick={() => handlePayment(499, 'Strategist')} className="px-5 py-2.5 bg-[#8B4513] text-white text-xs font-bold rounded-xl hover:opacity-90 transition-all active:scale-95 shadow-sm">
+            Upgrade Strategist
+          </button>
+          <button onClick={() => handlePayment(999, 'Imperial')} className="px-5 py-2.5 border-2 border-[#8B4513] text-[#8B4513] text-xs font-bold rounded-xl hover:bg-[#8B4513]/5 transition-all active:scale-95">
+            Go Imperial
+          </button>
+        </div>
+      </div>
+
       {/* Stats Overview */}
       <div className="lg:col-span-2 space-y-8">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

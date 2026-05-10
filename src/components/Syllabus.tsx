@@ -105,6 +105,8 @@ const SYLLABUS_DATA: Record<string, SyllabusPage[]> = {
 };
 
 export function Syllabus({ user }: { user: SupabaseUser }) {
+  if (!user) return null;
+
   const [activePaper, setActivePaper] = useState('GS Paper I');
   const [currentPage, setCurrentPage] = useState(0);
   const [direction, setDirection] = useState(0);

@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { User as SupabaseUser } from '@supabase/supabase-js';
-import { GoogleGenAI } from "@google/genai";
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Sparkles, 
@@ -31,16 +30,22 @@ export function VedicDashboard({ user, profile, setActiveTab }: VedicDashboardPr
   useEffect(() => {
     const fetchQuote = async () => {
       try {
-        const ai = new GoogleGenAI({ apiKey: process.env.VINTAGE_ORACLE_KEY || "" });
-        const aiResult = await ai.models.generateContent({
-          model: "gemini-3-flash-preview",
-          contents: [{ role: "user", parts: [{ text: `
+        const response = await fetch('/api/oracle/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: `
             Generate a powerful, motivational quote for a UPSC (Civil Services) aspirant. 
             The quote should be inspired by Vedic wisdom, ancient Indian philosophy, or the grit required for public service.
             Format: Quote | Author
-          ` }] }]
+          `,
+            systemInstruction: "You are the Imperial Oracle Quote Generator."
+          })
         });
-        const text = (aiResult.text || "").trim();
+
+        if (!response.ok) throw new Error("Oracle failed to respond.");
+        const data = await response.json();
+        const text = (data.text || "").trim();
         const [q, a] = text.split('|');
         setQuote(q || text);
         setAuthor(a || "Ancient Wisdom");
@@ -62,6 +67,8 @@ export function VedicDashboard({ user, profile, setActiveTab }: VedicDashboardPr
     { label: 'Hours Logged', value: '156h', icon: Clock, color: 'text-blue-500' },
     { label: 'Rank Estimate', value: 'Top 5%', icon: TrendingUp, color: 'text-green-500' },
   ];
+
+  if (!user) return null;
 
   const displayName = user.user_metadata?.full_name || user.email?.split('@')[0];
 
