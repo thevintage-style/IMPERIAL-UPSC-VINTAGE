@@ -26,29 +26,23 @@ export function VedicDashboard({ user, profile, setActiveTab }: VedicDashboardPr
   const [quote, setQuote] = useState<string>("Loading scholarly wisdom...");
   const [author, setAuthor] = useState<string>("The Imperial Oracle");
   const [isLoadingQuote, setIsLoadingQuote] = useState(true);
+// EXPIRY CHECK LOGIC
+  const isSubscriptionActive = profile?.subscription_expires_at 
+    ? new Date(profile.subscription_expires_at) > new Date() 
+    : false;
 
+  const hasImperialAccess = profile?.plan_type === 'Imperial' && isSubscriptionActive;
   useEffect(() => {
     const fetchQuote = async () => {
       try {
-        const response = await fetch('/api/oracle/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            prompt: `
-            Generate a powerful, motivational quote for a UPSC (Civil Services) aspirant. 
-            The quote should be inspired by Vedic wisdom, ancient Indian philosophy, or the grit required for public service.
-            Format: Quote | Author
-          `,
-            systemInstruction: "You are the Imperial Oracle Quote Generator."
-          })
-        });
+        const response = await fetch('/api/daily-quote');
 
         if (!response.ok) throw new Error("Oracle failed to respond.");
         const data = await response.json();
         const text = (data.text || "").trim();
         const [q, a] = text.split('|');
-        setQuote(q || text);
-        setAuthor(a || "Ancient Wisdom");
+        setQuote(q?.trim() || text);
+        setAuthor(a?.trim() || "Ancient Wisdom");
       } catch (error) {
         console.error("Error fetching quote:", error);
         setQuote("Success is not final, failure is not fatal: it is the courage to continue that counts.");
@@ -60,6 +54,29 @@ export function VedicDashboard({ user, profile, setActiveTab }: VedicDashboardPr
 
     fetchQuote();
   }, []);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('payment_status') === 'Credit') {
+      const activateImperial = async () => {
+        const expiry = new Date();
+        expiry.setDate(expiry.getDate() + 30); 
+
+        const { error } = await supabase
+          .from('profiles')
+          .update({ 
+            plan_type: 'Imperial', 
+            subscription_expires_at: expiry.toISOString() 
+          })
+          .eq('id', user?.id);
+
+        if (!error) {
+          window.history.replaceState({}, '', window.location.pathname);
+          window.location.reload(); 
+        }
+      };
+      activateImperial();
+    }
+  }, [user]);
 
   const stats = [
     { label: 'Study Streak', value: '12 Days', icon: Zap, color: 'text-orange-500' },

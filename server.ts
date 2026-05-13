@@ -98,7 +98,7 @@ const genAI = new GoogleGenAI({
 });
 
 // Advanced Error Handling for Gemini API
-const safeGenerateContent = async (options: { model: string, contents: any[], config?: any }, retries = 2): Promise<any> => {
+const safeGenerateContent = async (options: { model: string, contents: any[], config?: any }, retries = 3): Promise<any> => {
   try {
     return await genAI.models.generateContent(options);
   } catch (err: any) {
@@ -107,11 +107,12 @@ const safeGenerateContent = async (options: { model: string, contents: any[], co
     // Handle Rate Limits (429)
     if (errorMsg.includes("429") || errorMsg.includes("Quota exceeded") || errorMsg.includes("RESOURCE_EXHAUSTED")) {
       if (retries > 0) {
-        console.warn(`[Imperial Oracle] Quota exceeded. Waiting before retry... (${retries} left)`);
-        await new Promise(resolve => setTimeout(resolve, 20000)); // Wait 20 seconds for quota reset
+        const waitTime = (5 - retries) * 20000; // More aggressive backoff: 20s, 40s, 60s, 80s
+        console.warn(`[Imperial Oracle] Quota exceeded. Waiting ${waitTime/1000}s before retry... (${retries} left)`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
         return safeGenerateContent(options, retries - 1);
       }
-      throw new Error("Imperial Oracle is exhausted. Please try again after 15-20 seconds.");
+      throw new Error("Imperial Oracle is exhausted. Please try again after 60 seconds.");
     }
     
     // Handle Model Not Found (404)
@@ -187,9 +188,17 @@ const extractJson = (text: string) => {
   }
 };
 
+let isSyncing = false;
 const syncNews = async () => {
+  if (isSyncing) {
+    console.warn("[News Engine] Reconnaissance already in progress. Skipping duplicate mission.");
+    return 0;
+  }
+  isSyncing = true;
   try {
     console.log("Starting Imperial News Engine reconnaissance...");
+    const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+    
     const sources = [
       { name: "Insights on India", url: "https://www.insightsonindia.com/feed/" },
       { name: "PMF IAS", url: "https://www.pmfias.com/feed/" },
@@ -217,7 +226,7 @@ const syncNews = async () => {
         });
         
         const feed = await parser.parseString(response.data);
-        const items = feed.items.slice(0, 8);
+        const items = feed.items.slice(0, 5); // Reduced to 5 to save quota
 
         for (const item of items) {
           try {
@@ -229,6 +238,10 @@ const syncNews = async () => {
               console.log(`[News Engine] Discarding political/election noise: ${item.title}`);
               continue;
             }
+
+            // Pacing: Artificial delay to avoid Gemini rate limits (15 RPM free tier)
+            // Increased to 8s (7.5 RPM) to allow headroom for several concurrent users
+            await sleep(8500); 
 
             // Scoring with Gemini
             const prompt = `
@@ -297,6 +310,8 @@ const syncNews = async () => {
   } catch (globalErr) {
     console.error("Global News Sync Error:", globalErr);
     return 0;
+  } finally {
+    isSyncing = false;
   }
 };
 
@@ -665,6 +680,40 @@ app.post("/api/community/summarize", rateLimiter, async (req, res) => {
   } catch (error: any) {
     console.error("Community Summary Error:", error);
     res.status(500).json({ error: "Failed to generate community summary." });
+  }
+});
+
+// Daily Quote Cache
+let cachedQuote: { text: string, date: string } | null = null;
+
+app.get("/api/daily-quote", async (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    if (cachedQuote && cachedQuote.date === today) {
+      return res.json({ text: cachedQuote.text });
+    }
+
+    console.log("[Imperial Oracle] Generating fresh daily wisdom...");
+    const prompt = `
+      Generate a powerful, motivational quote for a UPSC (Civil Services) aspirant. 
+      The quote should be inspired by Vedic wisdom, ancient Indian philosophy, or the grit required for public service.
+      Format: Quote | Author
+    `;
+
+    const result = await safeGenerateContent({
+      model: "gemini-3-flash-preview",
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      config: {
+        systemInstruction: "You are the Imperial Oracle Quote Generator."
+      }
+    });
+
+    const quoteText = result.text || "Success is the result of preparation, hard work, and learning from failure. | Colin Powell";
+    cachedQuote = { text: quoteText, date: today };
+    res.json({ text: quoteText });
+  } catch (error) {
+    console.error("Quote Generation Error:", error);
+    res.json({ text: "Arise, awake, and stop not until the goal is reached. | Swami Vivekananda" });
   }
 });
 

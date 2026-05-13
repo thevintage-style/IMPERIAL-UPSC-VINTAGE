@@ -40,7 +40,7 @@ export function Subscription({ user, profile }: SubscriptionProps) {
 
   const handleInstamojoPayment = (plan: Plan) => {
     if (plan.instamojo_url) {
-      window.open(plan.instamojo_url, '_blank');
+     window.location.href = `${plan.instamojo_url}?embed=form&redirect_url=${window.location.origin}/dashboard`;
     } else {
       alert("This plan is currently being finalized in the Imperial Treasury. Please try again later.");
     }

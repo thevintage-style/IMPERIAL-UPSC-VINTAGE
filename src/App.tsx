@@ -22,6 +22,7 @@ import { RulesAndRegulations } from './components/RulesAndRegulations';
 import { VedicDashboard } from './components/VedicDashboard';
 import { PersonalVault } from './components/PersonalVault';
 import { VizierControl } from './components/VizierControl';
+import { Success } from './components/Success';
 import { Button } from './components/ui/button';
 import { LogIn, BookOpen } from 'lucide-react';
 
@@ -234,6 +235,11 @@ export default function App() {
         </div>
       </div>
     );
+  }
+
+  // Handle success route
+  if (window.location.pathname === '/success') {
+    return <Success />;
   }
 
   return (
