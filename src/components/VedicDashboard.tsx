@@ -15,6 +15,7 @@ import {
 import { Button } from './ui/button';
 
 import { UserProfile } from '../types';
+import { supabase } from '../lib/supabase';
 
 interface VedicDashboardProps {
   user: SupabaseUser;

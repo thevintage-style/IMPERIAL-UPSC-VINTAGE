@@ -98,7 +98,7 @@ const genAI = new GoogleGenAI({
 });
 
 // Advanced Error Handling for Gemini API
-const safeGenerateContent = async (options: { model: string, contents: any[], config?: any }, retries = 3): Promise<any> => {
+const safeGenerateContent = async (options: { model: string, contents: any[], config?: any }, retries = 5): Promise<any> => {
   try {
     return await genAI.models.generateContent(options);
   } catch (err: any) {
@@ -107,7 +107,7 @@ const safeGenerateContent = async (options: { model: string, contents: any[], co
     // Handle Rate Limits (429)
     if (errorMsg.includes("429") || errorMsg.includes("Quota exceeded") || errorMsg.includes("RESOURCE_EXHAUSTED")) {
       if (retries > 0) {
-        const waitTime = (5 - retries) * 20000; // More aggressive backoff: 20s, 40s, 60s, 80s
+        const waitTime = (6 - retries) * 15000; // Backoff: 15s, 30s, 45s, 60s, 75s
         console.warn(`[Imperial Oracle] Quota exceeded. Waiting ${waitTime/1000}s before retry... (${retries} left)`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
         return safeGenerateContent(options, retries - 1);
@@ -240,8 +240,8 @@ const syncNews = async () => {
             }
 
             // Pacing: Artificial delay to avoid Gemini rate limits (15 RPM free tier)
-            // Increased to 8s (7.5 RPM) to allow headroom for several concurrent users
-            await sleep(8500); 
+            // Increased to 10s (6 RPM) for extreme safety during background sync
+            await sleep(10000); 
 
             // Scoring with Gemini
             const prompt = `
@@ -685,6 +685,7 @@ app.post("/api/community/summarize", rateLimiter, async (req, res) => {
 
 // Daily Quote Cache
 let cachedQuote: { text: string, date: string } | null = null;
+let isGeneratingQuote = false;
 
 app.get("/api/daily-quote", async (req, res) => {
   try {
@@ -693,24 +694,34 @@ app.get("/api/daily-quote", async (req, res) => {
       return res.json({ text: cachedQuote.text });
     }
 
+    if (isGeneratingQuote) {
+      // Return a temporary message if generation is already in progress to avoid double-calling API
+      return res.json({ text: "The Imperial Oracle is meditating on the day's wisdom... | Ancient Guard" });
+    }
+
+    isGeneratingQuote = true;
     console.log("[Imperial Oracle] Generating fresh daily wisdom...");
-    const prompt = `
-      Generate a powerful, motivational quote for a UPSC (Civil Services) aspirant. 
-      The quote should be inspired by Vedic wisdom, ancient Indian philosophy, or the grit required for public service.
-      Format: Quote | Author
-    `;
+    try {
+      const prompt = `
+        Generate a powerful, motivational quote for a UPSC (Civil Services) aspirant. 
+        The quote should be inspired by Vedic wisdom, ancient Indian philosophy, or the grit required for public service.
+        Format: Quote | Author
+      `;
 
-    const result = await safeGenerateContent({
-      model: "gemini-3-flash-preview",
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      config: {
-        systemInstruction: "You are the Imperial Oracle Quote Generator."
-      }
-    });
+      const result = await safeGenerateContent({
+        model: "gemini-3-flash-preview",
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        config: {
+          systemInstruction: "You are the Imperial Oracle Quote Generator."
+        }
+      });
 
-    const quoteText = result.text || "Success is the result of preparation, hard work, and learning from failure. | Colin Powell";
-    cachedQuote = { text: quoteText, date: today };
-    res.json({ text: quoteText });
+      const quoteText = result.text || "Success is the result of preparation, hard work, and learning from failure. | Colin Powell";
+      cachedQuote = { text: quoteText, date: today };
+      res.json({ text: quoteText });
+    } finally {
+      isGeneratingQuote = false;
+    }
   } catch (error) {
     console.error("Quote Generation Error:", error);
     res.json({ text: "Arise, awake, and stop not until the goal is reached. | Swami Vivekananda" });
