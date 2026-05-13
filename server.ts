@@ -541,7 +541,7 @@ app.post("/api/news/archive", async (req, res) => {
     const client = getSupabase();
     if (!client) throw new Error("Imperial Archives offline.");
 
-    const { data: docData, error: archivalError } = await client.from("vault_items").insert({
+    const { data: docData, error: archivalError } = await client.from("personal_vault").insert({
       title: title || "Archived Chronicle",
       type: 'link',
       url: url,

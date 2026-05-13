@@ -38,18 +38,18 @@ interface LogEntry {
   id?: string;
   user_id: string;
   title: string;
-  journal_data: string;
-  sheet_data: string;
-  canvas_data: string;
-  ai_summary: string;
+  entry_type: 'Journal' | 'Log' | 'Canvas';
+  content: string; // Combined JSON or text
+  ai_summary?: string;
   created_at: any;
 }
 
 interface FolioProps {
   user: SupabaseUser;
+  selectedEntryId?: string | null;
 }
 
-export function Folio({ user }: FolioProps) {
+export function Folio({ user, selectedEntryId }: FolioProps) {
   if (!user) return null;
 
   const [activeModule, setActiveModule] = useState<'journal' | 'sheet' | 'canvas'>('journal');
@@ -76,13 +76,46 @@ export function Folio({ user }: FolioProps) {
   const isInitialLoad = useRef(true);
   const userId = user.id;
 
-  // Load Latest Log on Mount
+  // Load Selected Entry when selectedEntryId changes
+  useEffect(() => {
+    if (!userId || !selectedEntryId) return;
+
+    const fetchSelectedEntry = async () => {
+      const { data, error } = await supabase
+        .from('journal_entries')
+        .select('*')
+        .eq('id', selectedEntryId)
+        .single();
+      
+      if (data) {
+        const docData = data as LogEntry;
+        setCurrentLog(docData);
+        
+        if (docData.entry_type === 'Journal') {
+          setJournalText(docData.content || '');
+          setActiveModule('journal');
+        } else if (docData.entry_type === 'Canvas') {
+          try {
+            setStrokes(JSON.parse(docData.content || '[]'));
+            setActiveModule('canvas');
+          } catch (e) { console.error("Canvas parse error", e); }
+        } else if (docData.entry_type === 'Log') {
+          try {
+            setSheetRows(JSON.parse(docData.content || '[]'));
+            setActiveModule('sheet');
+          } catch (e) { console.error("Sheet parse error", e); }
+        }
+      }
+    };
+
+    fetchSelectedEntry();
+  }, [userId, selectedEntryId]);
   useEffect(() => {
     if (!userId) return;
 
     const fetchLatestLog = async () => {
       const { data, error } = await supabase
-        .from('folio_notes')
+        .from('journal_entries')
         .select('*')
         .eq('user_id', userId)
         .order('created_at', { ascending: false })
@@ -93,28 +126,23 @@ export function Folio({ user }: FolioProps) {
         const docData = data as LogEntry;
         if (isInitialLoad.current || (currentLog && currentLog.id !== data.id)) {
           setCurrentLog(docData);
-          setJournalText(docData.journal_data || '');
-          try {
-            setStrokes(JSON.parse(docData.canvas_data || '[]'));
-          } catch (e) { console.error("Canvas parse error", e); }
           
-          // Fetch Supabase logs for the sheet
-          const { data: supaLogs } = await supabase
-            .from('study_logs')
-            .select('*')
-            .eq('user_id', userId)
-            .order('date', { ascending: false });
-          
-          if (supaLogs) {
-            setSheetRows(supaLogs.map(l => ({
-              id: l.id,
-              time: l.date,
-              topic: l.subject,
-              status: 'Completed',
-              duration: l.duration
-            })));
+          // Reconstruct states from content based on type
+          if (docData.entry_type === 'Journal') {
+            setJournalText(docData.content || '');
+            setActiveModule('journal');
+          } else if (docData.entry_type === 'Canvas') {
+            try {
+              setStrokes(JSON.parse(docData.content || '[]'));
+              setActiveModule('canvas');
+            } catch (e) { console.error("Canvas parse error", e); }
+          } else if (docData.entry_type === 'Log') {
+            try {
+              setSheetRows(JSON.parse(docData.content || '[]'));
+              setActiveModule('sheet');
+            } catch (e) { console.error("Sheet parse error", e); }
           }
-
+          
           isInitialLoad.current = false;
         }
       } else {
@@ -135,9 +163,10 @@ export function Folio({ user }: FolioProps) {
     
     const fetchJournals = async () => {
       const { data, error } = await supabase
-        .from('journals')
+        .from('journal_entries')
         .select('*')
         .eq('user_id', userId)
+        .eq('entry_type', 'Journal')
         .order('created_at', { ascending: false });
       
       if (data) {
@@ -168,36 +197,37 @@ export function Folio({ user }: FolioProps) {
     if (!isAuto) setIsSaving(true);
 
     try {
+      let content = '';
+      let type: 'Journal' | 'Log' | 'Canvas' = 'Journal';
+      
+      if (activeModule === 'journal') {
+        content = journalText;
+        type = 'Journal';
+      } else if (activeModule === 'sheet') {
+        content = JSON.stringify(sheetRows);
+        type = 'Log';
+      } else if (activeModule === 'canvas') {
+        content = JSON.stringify(strokes);
+        type = 'Canvas';
+      }
+
       const logData = {
         user_id: userId,
-        title: `Imperial Log - ${new Date().toLocaleDateString()}`,
-        journal_data: journalText,
-        sheet_data: JSON.stringify(sheetRows),
-        canvas_data: JSON.stringify(strokes),
+        title: `Imperial ${type} - ${new Date().toLocaleDateString()}`,
+        entry_type: type,
+        content: content,
         ai_summary: currentLog?.ai_summary || '',
         created_at: currentLog?.created_at || new Date().toISOString()
       };
 
-      // Save to Supabase (study_logs)
-      if (!isAuto && sheetRows.length > 0) {
-        const latestEntry = sheetRows[sheetRows.length - 1];
-        await supabase.from('study_logs').insert({
-          user_id: userId,
-          subject: latestEntry.topic,
-          duration: latestEntry.duration || 60,
-          notes: journalText.substring(0, 500),
-          date: new Date().toISOString().split('T')[0]
-        });
-      }
-
       if (currentLog?.id) {
         await supabase
-          .from('folio_notes')
+          .from('journal_entries')
           .update(logData)
           .eq('id', currentLog.id);
       } else {
         const { data, error } = await supabase
-          .from('folio_notes')
+          .from('journal_entries')
           .insert([logData])
           .select()
           .single();
@@ -205,7 +235,7 @@ export function Folio({ user }: FolioProps) {
         if (data) setCurrentLog(data);
       }
 
-      if (!isAuto) setStatus({ type: 'success', message: "Imperial Log safely archived in Supabase." });
+      if (!isAuto) setStatus({ type: 'success', message: "Imperial Script archived in your Journal." });
     } catch (error) {
       console.error("Save Error:", error);
       if (!isAuto) setStatus({ type: 'error', message: "The archives are currently sealed." });
@@ -218,7 +248,7 @@ export function Folio({ user }: FolioProps) {
     if (!userId) return;
     try {
       await supabase
-        .from('folio_notes')
+        .from('journal_entries')
         .delete()
         .eq('user_id', userId);
       
@@ -264,7 +294,7 @@ export function Folio({ user }: FolioProps) {
       
       if (currentLog?.id) {
         await supabase
-          .from('folio_notes')
+          .from('journal_entries')
           .update({ ai_summary: text })
           .eq('id', currentLog.id);
       }
@@ -447,9 +477,10 @@ export function Folio({ user }: FolioProps) {
               <button 
                 onClick={async () => {
                   try {
-                    await supabase.from('journals').insert({
+                    await supabase.from('journal_entries').insert({
                       user_id: userId,
                       title: `Journal Entry - ${new Date().toLocaleDateString()}`,
+                      entry_type: 'Journal',
                       content: journalText,
                       created_at: new Date().toISOString()
                     });

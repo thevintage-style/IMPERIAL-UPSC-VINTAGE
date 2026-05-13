@@ -110,7 +110,7 @@ export function PersonalVault({ user }: PersonalVaultProps) {
 
     const fetchItems = async () => {
       const { data, error } = await supabase
-        .from('vault_items')
+        .from('personal_vault')
         .select('*')
         .eq('user_id', userId)
         .order('created_at', { ascending: false });
@@ -126,7 +126,7 @@ export function PersonalVault({ user }: PersonalVaultProps) {
 
     const channel = supabase
       .channel('vault_items_changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'vault_items', filter: `user_id=eq.${userId}` }, fetchItems)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'personal_vault', filter: `user_id=eq.${userId}` }, fetchItems)
       .subscribe();
 
     return () => {
@@ -149,16 +149,16 @@ export function PersonalVault({ user }: PersonalVaultProps) {
       const filePath = `${userId}/${fileName}`;
       
       const { error: uploadError } = await supabase.storage
-        .from('vault')
+        .from('imperial-resources')
         .upload(filePath, file);
 
       if (uploadError) throw uploadError;
 
       const { data: { publicUrl } } = supabase.storage
-        .from('vault')
+        .from('imperial-resources')
         .getPublicUrl(filePath);
 
-      await supabase.from('vault_items').insert({
+      await supabase.from('personal_vault').insert({
         title: file.name,
         type: file.type.includes('pdf') ? 'pdf' : file.type.includes('video') ? 'video' : 'pdf',
         url: publicUrl,
@@ -167,6 +167,7 @@ export function PersonalVault({ user }: PersonalVaultProps) {
         created_at: new Date().toISOString()
       });
 
+      alert("Seal Intact: Resource successfully archived in your vault.");
     } catch (error: any) {
       console.error('Upload Error:', error);
       alert(`Scholarly Upload Failed: ${error.message}`);
@@ -231,12 +232,14 @@ export function PersonalVault({ user }: PersonalVaultProps) {
         // The backend handles the insertion, real-time will update the list
       } else {
         // Direct insertion for notes and other local types
-        await supabase.from('vault_items').insert({
+        const { error } = await supabase.from('personal_vault').insert({
           ...newItem,
           user_id: userId,
           folder_id: currentFolderId,
           created_at: new Date().toISOString()
         });
+        if (error) throw error;
+        alert("Seal Intact: Resource successfully archived in your vault.");
       }
       setIsAddingItem(false);
       setNewItem({ title: '', type: 'link', url: '', content: '' });
@@ -254,7 +257,7 @@ export function PersonalVault({ user }: PersonalVaultProps) {
     if (!userId) return;
     try {
       if (type === 'item') {
-        await supabase.from('vault_items').delete().eq('id', id);
+        await supabase.from('personal_vault').delete().eq('id', id);
       } else {
         // Simple delete for now (cascading handled by DB usually, or recursive if needed)
         await supabase.from('vault_folders').delete().eq('id', id);
@@ -268,7 +271,7 @@ export function PersonalVault({ user }: PersonalVaultProps) {
   const handleMoveToFolder = async (itemId: string, targetFolderId: string | null) => {
     if (!userId) return;
     try {
-      await supabase.from('vault_items')
+      await supabase.from('personal_vault')
         .update({ folder_id: targetFolderId })
         .eq('id', itemId);
       setMovingItem(null);
@@ -280,13 +283,14 @@ export function PersonalVault({ user }: PersonalVaultProps) {
   const handleSaveNote = async () => {
     if (!editingNote || !userId) return;
     try {
-      await supabase.from('vault_items')
+      await supabase.from('personal_vault')
         .update({
           content: editingNote.content,
           title: editingNote.title
         })
         .eq('id', editingNote.id);
       setEditingNote(null);
+      alert("Scripture Updated: Your manuscript has been safely resealed.");
     } catch (error) {
       console.error("Error saving note:", error);
     }

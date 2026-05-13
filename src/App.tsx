@@ -34,6 +34,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSignUp, setIsSignUp] = useState(true);
+  const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
 
   const isAdmin = user?.email === "raksha05jk.rao@gmail.com";
 
@@ -243,12 +244,18 @@ export default function App() {
   }
 
   return (
-    <Layout user={user as any} activeTab={activeTab} setActiveTab={setActiveTab} profile={profile}>
+    <Layout 
+      user={user as any} 
+      activeTab={activeTab} 
+      setActiveTab={setActiveTab} 
+      profile={profile}
+      onEntrySelect={(id) => setSelectedEntryId(id)}
+    >
       {activeTab === 'dashboard' && <VedicDashboard user={user as any} profile={profile} setActiveTab={setActiveTab} />}
       {activeTab === 'syllabus' && <Syllabus user={user as any} />}
       {activeTab === 'oracle' && <Oracle user={user as any} profile={profile} />}
       {activeTab === 'cartographer' && <Cartographer user={user as any} />}
-      {activeTab === 'folio' && <Folio user={user as any} />}
+      {activeTab === 'folio' && <Folio user={user as any} selectedEntryId={selectedEntryId} />}
       {activeTab === 'news' && <NewsDesk user={user as any} />}
       {activeTab === 'resource-hub' && <IntegratedResourceHub user={user as any} isAdmin={isAdmin} />}
       {activeTab === 'vault' && <PersonalVault user={user as any} />}

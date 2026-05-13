@@ -76,9 +76,10 @@ export function Oracle({ user, profile }: OracleProps) {
       try {
         // Fetch latest journal from Supabase
         const { data: journal } = await supabase
-          .from('journals')
+          .from('journal_entries')
           .select('*')
           .eq('user_id', userId)
+          .eq('entry_type', 'Journal')
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();

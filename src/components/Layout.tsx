@@ -22,7 +22,9 @@ import {
   Gavel,
   Archive,
   Star,
-  Settings
+  Settings,
+  Table,
+  ChevronRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { OracleOS } from './OracleOS';
@@ -35,24 +37,54 @@ interface LayoutProps {
   profile: UserProfile | null;
   activeTab: string;
   setActiveTab: (tab: string) => void;
+  onEntrySelect?: (entryId: string) => void;
   children: React.ReactNode;
 }
 
-export function Layout({ user, profile, activeTab, setActiveTab, children }: LayoutProps) {
+export function Layout({ user, profile, activeTab, setActiveTab, onEntrySelect, children }: LayoutProps) {
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(true);
   const [activeOffers, setActiveOffers] = React.useState<any[]>([]);
+  const [journalEntries, setJournalEntries] = React.useState<any[]>([]);
+  const [openFolders, setOpenFolders] = React.useState<string[]>(['Journals', 'Logs', 'Canvases']);
 
   React.useEffect(() => {
     const fetchOffers = async () => {
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from('discount_offers')
         .select('*')
         .eq('is_active', true);
       
       if (data) setActiveOffers(data);
     };
+    
+    const fetchEntries = async () => {
+      if (!user) return;
+      const { data } = await supabase
+        .from('journal_entries')
+        .select('id, title, entry_type')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+      
+      if (data) setJournalEntries(data);
+    };
+
     fetchOffers();
-  }, []);
+    fetchEntries();
+
+    const channel = supabase.channel('journal_entries_sidebar')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'journal_entries', filter: `user_id=eq.${user.id}` }, fetchEntries)
+      .subscribe();
+
+    return () => {
+      channel.unsubscribe();
+    };
+  }, [user]);
+
+  const toggleFolder = (folder: string) => {
+    setOpenFolders(prev => 
+      prev.includes(folder) ? prev.filter(f => f !== folder) : [...prev, folder]
+    );
+  };
 
   const navItems = [
     { id: 'dashboard', label: 'Imperial Home', icon: LayoutDashboard },
@@ -115,28 +147,86 @@ export function Layout({ user, profile, activeTab, setActiveTab, children }: Lay
           </button>
         </div>
 
-        <nav className="flex-1 px-4 py-4 space-y-1">
-          {navItems.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setActiveTab(item.id)}
-              className={cn(
-                "w-full flex items-center gap-4 p-3 rounded-xl transition-all duration-200 group relative",
-                activeTab === item.id 
-                  ? "bg-leather text-parchment shadow-md" 
-                  : "hover:bg-parchment text-leather/60 hover:text-leather"
-              )}
-            >
-              <item.icon size={20} className={cn(activeTab === item.id ? "text-lime" : "group-hover:scale-110 transition-transform")} />
-              {isSidebarOpen && (
-                <span className="font-serif font-medium tracking-wide text-xs">{item.label}</span>
-              )}
-              {activeTab === item.id && (
-                <motion.div layoutId="nav-glow" className="absolute inset-0 bg-lime/5 rounded-xl border border-lime/20 pointer-events-none" />
-              )}
-            </button>
-          ))}
-        </nav>
+        <div className="flex-1 overflow-y-auto custom-scrollbar">
+          <nav className="px-4 py-4 space-y-1">
+            {navItems.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => setActiveTab(item.id)}
+                className={cn(
+                  "w-full flex items-center gap-4 p-3 rounded-xl transition-all duration-200 group relative",
+                  activeTab === item.id 
+                    ? "bg-leather text-parchment shadow-md" 
+                    : "hover:bg-parchment text-leather/60 hover:text-leather"
+                )}
+              >
+                <item.icon size={20} className={cn(activeTab === item.id ? "text-lime" : "group-hover:scale-110 transition-transform")} />
+                {isSidebarOpen && (
+                  <span className="font-serif font-medium tracking-wide text-xs">{item.label}</span>
+                )}
+                {activeTab === item.id && (
+                  <motion.div layoutId="nav-glow" className="absolute inset-0 bg-lime/5 rounded-xl border border-lime/20 pointer-events-none" />
+                )}
+              </button>
+            ))}
+
+            {isSidebarOpen && (
+              <div className="mt-8 space-y-4">
+                <div className="px-3">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-leather/40 mb-4">Imperial Records</p>
+                </div>
+                
+                {['Journal', 'Log', 'Canvas'].map((type) => {
+                  const label = type === 'Journal' ? 'Journals' : type === 'Log' ? 'Logs' : 'Canvases';
+                  const Icon = type === 'Journal' ? Book : type === 'Log' ? Table : PenTool;
+                  const filtered = journalEntries.filter(e => e.entry_type === type);
+                  const isOpen = openFolders.includes(label);
+
+                  return (
+                    <div key={type} className="space-y-1">
+                      <button 
+                        onClick={() => toggleFolder(label)}
+                        className="w-full flex items-center justify-between px-3 py-2 rounded-lg hover:bg-leather/5 text-leather/80 group transition-colors"
+                      >
+                        <div className="flex items-center gap-3">
+                          <Icon size={16} className="text-saddle-brown/60 group-hover:text-leather" />
+                          <span className="text-xs font-serif font-bold">{label}</span>
+                        </div>
+                        <ChevronRight size={14} className={cn("transition-transform", isOpen && "rotate-90")} />
+                      </button>
+                      
+                      <AnimatePresence>
+                        {isOpen && (
+                          <motion.div 
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            className="overflow-hidden ml-4 pl-4 border-l border-leather/10 space-y-1"
+                          >
+                            {filtered.length > 0 ? filtered.map((entry) => (
+                              <button
+                                key={entry.id}
+                                onClick={() => {
+                                  setActiveTab('folio');
+                                  if (onEntrySelect) onEntrySelect(entry.id);
+                                }}
+                                className="w-full text-left p-2 rounded-lg text-[11px] font-serif text-leather/60 hover:text-leather hover:bg-leather/5 truncate block transition-colors"
+                              >
+                                {entry.title}
+                              </button>
+                            )) : (
+                              <span className="text-[10px] italic text-leather/30 p-2 block">No records found</span>
+                            )}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </nav>
+        </div>
 
         <div className="p-4 border-t border-leather/10">
           <button 
