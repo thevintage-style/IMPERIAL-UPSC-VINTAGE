@@ -81,6 +81,25 @@ import { createClient } from "@supabase/supabase-js";
 
 // Initialize Supabase Admin for backend operations
 let supabaseClient: any = null;
+
+const fetchWithRetry = async (url: string, options: any, retries = 3): Promise<Response> => {
+  try {
+    const res = await fetch(url, options);
+    return res;
+  } catch (err: any) {
+    const isRetryable = err.message?.includes('Failed to fetch') || 
+                       err.message?.includes('NetworkError') || 
+                       err.name === 'TypeError';
+    
+    if (retries > 0 && isRetryable) {
+      console.warn(`[Supabase Backend] Fetch failed. Retrying... (${retries} left)`);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      return fetchWithRetry(url, options, retries - 1);
+    }
+    throw err;
+  }
+};
+
 const getSupabase = () => {
   if (!supabaseClient) {
     const envStatus = validateEnv();
@@ -88,7 +107,11 @@ const getSupabase = () => {
       console.warn("[Supabase] Backend client not initialized: Missing or invalid credentials.");
       return null;
     }
-    supabaseClient = createClient(envStatus.keys.supabaseUrl, envStatus.keys.supabaseServiceKey);
+    supabaseClient = createClient(envStatus.keys.supabaseUrl, envStatus.keys.supabaseServiceKey, {
+      global: {
+        fetch: fetchWithRetry as any
+      }
+    });
   }
   return supabaseClient;
 };
