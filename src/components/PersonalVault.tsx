@@ -169,12 +169,13 @@ export function PersonalVault({ user }: PersonalVaultProps) {
 
       if (insertError) throw insertError;
 
+      setIsUploading(false);
       alert("Saved to Vault: Your scholarly resource has been archived.");
     } catch (error: any) {
+      setIsUploading(false);
       console.error('Upload Error:', error);
       alert(`Scholarly Upload Failed: ${error.message}`);
     } finally {
-      setIsUploading(false);
       if (e.target) e.target.value = '';
     }
   };
@@ -222,7 +223,8 @@ export function PersonalVault({ user }: PersonalVaultProps) {
       const { error } = await supabase.from('personal_vault').insert({
         title: newItem.title,
         type: newItem.type,
-        url: newItem.url || '',
+        url: newItem.url || '', // This is the address
+        content: newItem.content || '',
         user_id: userId,
         folder_id: currentFolderId,
         created_at: new Date().toISOString()
@@ -230,14 +232,16 @@ export function PersonalVault({ user }: PersonalVaultProps) {
       
       if (error) throw error;
       
+      setIsLoading(false);
       alert("Saved to Vault: Your scholarly resource has been archived.");
       setIsAddingItem(false);
       setNewItem({ title: '', type: 'link', url: '', content: '' });
     } catch (error: any) {
+      setIsLoading(false);
       console.error("Error adding item:", error);
       alert(`Vault Access Error: ${error.message}`);
     } finally {
-      setIsLoading(false);
+      // Final state handles by individual try/catch resets
     }
   };
 
