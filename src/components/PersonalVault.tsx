@@ -158,7 +158,7 @@ export function PersonalVault({ user }: PersonalVaultProps) {
         .from('imperial-resources')
         .getPublicUrl(filePath);
 
-      await supabase.from('personal_vault').insert({
+      const { error: insertError } = await supabase.from('personal_vault').insert({
         title: file.name,
         type: file.type.includes('pdf') ? 'pdf' : file.type.includes('video') ? 'video' : 'pdf',
         url: publicUrl,
@@ -167,7 +167,9 @@ export function PersonalVault({ user }: PersonalVaultProps) {
         created_at: new Date().toISOString()
       });
 
-      alert("Seal Intact: Resource successfully archived in your vault.");
+      if (insertError) throw insertError;
+
+      alert("Saved to Vault: Your scholarly resource has been archived.");
     } catch (error: any) {
       console.error('Upload Error:', error);
       alert(`Scholarly Upload Failed: ${error.message}`);
@@ -208,44 +210,32 @@ export function PersonalVault({ user }: PersonalVaultProps) {
 
   const handleAddItem = async () => {
     if (!newItem.title || !userId) return;
+
+    if (!isConfigured) {
+      alert("Imperial Archives Inaccessible: Supabase is not correctly configured.");
+      return;
+    }
+
     setIsLoading(true);
     try {
-      if (newItem.type === 'link' && newItem.url) {
-        // Use backend analysis and archival for links
-        const response = await fetch('/api/news/archive', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            url: newItem.url,
-            title: newItem.title,
-            userId: userId,
-            content: newItem.content
-          })
-        });
-
-        if (!response.ok) {
-          const errData = await response.json();
-          throw new Error(errData.error || "Failed to analyze and archive.");
-        }
-        
-        const data = await response.json();
-        // The backend handles the insertion, real-time will update the list
-      } else {
-        // Direct insertion for notes and other local types
-        const { error } = await supabase.from('personal_vault').insert({
-          ...newItem,
-          user_id: userId,
-          folder_id: currentFolderId,
-          created_at: new Date().toISOString()
-        });
-        if (error) throw error;
-        alert("Seal Intact: Resource successfully archived in your vault.");
-      }
+      // Direct insertion into personal_vault as requested
+      const { error } = await supabase.from('personal_vault').insert({
+        title: newItem.title,
+        type: newItem.type,
+        url: newItem.url || '',
+        user_id: userId,
+        folder_id: currentFolderId,
+        created_at: new Date().toISOString()
+      });
+      
+      if (error) throw error;
+      
+      alert("Saved to Vault: Your scholarly resource has been archived.");
       setIsAddingItem(false);
       setNewItem({ title: '', type: 'link', url: '', content: '' });
     } catch (error: any) {
       console.error("Error adding item:", error);
-      alert(`Scholarly Addition Failed: ${error.message}`);
+      alert(`Vault Access Error: ${error.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -559,7 +549,9 @@ export function PersonalVault({ user }: PersonalVaultProps) {
               </div>
               <div className="flex gap-3 mt-10">
                 <Button onClick={() => setIsAddingItem(false)} variant="ghost" className="flex-1">Cancel</Button>
-                <Button onClick={handleAddItem} className="flex-1 bg-[#8B4513] text-white">Add to Vault</Button>
+                <Button onClick={handleAddItem} className="flex-1 bg-[#8B4513] text-white" disabled={isLoading}>
+                  {isLoading ? 'Sealing...' : 'Add to Vault'}
+                </Button>
               </div>
             </motion.div>
           </div>
