@@ -108,6 +108,18 @@ export function Layout({ user, profile, activeTab, setActiveTab, onEntrySelect, 
     navItems.push({ id: 'owner-settings', label: 'Owner Logic', icon: Settings });
   }
 
+  const handleLogout = async () => {
+    try {
+      await supabaseSignOut();
+    } catch (error) {
+      console.error("Logout error:", error);
+      // Fallback in case the imported function fails
+      localStorage.clear();
+      sessionStorage.clear();
+      window.location.href = '/';
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#f5f2ed] flex font-sans text-leather">
       {/* Sidebar */}
@@ -259,9 +271,7 @@ export function Layout({ user, profile, activeTab, setActiveTab, onEntrySelect, 
             )}
           </button>
           <button
-            onClick={async () => {
-              await supabaseSignOut();
-            }}
+            onClick={handleLogout}
             className="w-full flex items-center gap-4 p-3 rounded-xl text-red-600 hover:bg-red-50 transition-colors"
           >
             <LogOut size={22} />

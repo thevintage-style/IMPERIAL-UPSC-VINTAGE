@@ -152,12 +152,7 @@ export function PersonalVault({ user }: PersonalVaultProps) {
       
       const { error: uploadError } = await supabase.storage
         .from('imperial-resources')
-        .upload(filePath, file, {
-          onUploadProgress: (progress) => {
-            const percent = (progress.loaded / progress.total) * 100;
-            setUploadProgress(Math.round(percent));
-          }
-        });
+        .upload(filePath, file);
 
       if (uploadError) throw uploadError;
 

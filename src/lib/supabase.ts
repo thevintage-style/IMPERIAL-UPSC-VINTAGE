@@ -56,7 +56,17 @@ export const signOut = async () => {
     localStorage.clear();
     sessionStorage.clear();
     
-    // Force redirect to landing page
+    // Clear cookies (best effort)
+    document.cookie.split(";").forEach((c) => {
+      document.cookie = c
+        .replace(/^ +/, "")
+        .replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
+    });
+
+    // Force redirect to landing page and refresh
     window.location.href = '/';
+    setTimeout(() => {
+      window.location.reload();
+    }, 100);
   }
 };

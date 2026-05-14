@@ -125,12 +125,19 @@ const genAI = new GoogleGenAI({
 let lastGeminiCall = 0;
 const MIN_GAP = 5000; // 5 seconds minimum between any two calls (12 RPM)
 
-const safeGenerateContent = async (options: { model: string, contents: any[], config?: any }, retries = 7): Promise<any> => {
+const safeGenerateContent = async (options: { model: string, contents: any[], config?: any }, retries = 3, isBackground = false): Promise<any> => {
   // Global pacing check
   const now = Date.now();
   const gapSinceLast = now - lastGeminiCall;
-  if (gapSinceLast < MIN_GAP) {
-    await new Promise(resolve => setTimeout(resolve, MIN_GAP - gapSinceLast + Math.random() * 1000));
+  const targetGap = isBackground ? 6000 : 4100; // 10 RPM for background, ~14.6 RPM for foreground
+
+  if (gapSinceLast < targetGap) {
+    const waitTime = targetGap - gapSinceLast + Math.random() * 500;
+    // Don't wait too long for foreground requests
+    if (!isBackground && waitTime > 10000) {
+      throw new Error("Imperial Oracle is too busy. Please try again in a few moments.");
+    }
+    await new Promise(resolve => setTimeout(resolve, waitTime));
   }
   lastGeminiCall = Date.now();
 
@@ -142,17 +149,14 @@ const safeGenerateContent = async (options: { model: string, contents: any[], co
     // Handle Rate Limits (429, Resource Exhausted, Quota)
     if (errorMsg.includes("429") || errorMsg.includes("quota") || errorMsg.includes("exhausted")) {
       if (retries > 0) {
-        // Exponential backoff: 
-        // retries=7 -> gap=1
-        // retries=6 -> gap=2
-        // retries=1 -> gap=64
-        // waitTime: (2 ^ (8-retries)) * 5000ms + jitter
-        const backoffStep = 8 - retries;
-        const waitTime = (Math.pow(2, backoffStep) * 5000) + (Math.random() * 10000); 
+        // Shorter backoff for non-background tasks to stay under proxy timeouts (usually 30-60s)
+        const backoffStep = 4 - retries; // max 3 retries normally
+        const baseWait = isBackground ? 10000 : 3000;
+        const waitTime = (Math.pow(2, backoffStep) * baseWait) + (Math.random() * 2000); 
         
         console.warn(`[Imperial Oracle] Quota exceeded. Waiting ${Math.round(waitTime/1000)}s before retry... (${retries} left)`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
-        return safeGenerateContent(options, retries - 1);
+        return safeGenerateContent(options, retries - 1, isBackground);
       }
       throw new Error("Imperial Oracle is exhausted. Please try again after 60 seconds.");
     }
@@ -195,11 +199,10 @@ const rateLimiter = (req: express.Request, res: express.Response, next: express.
   next();
 };
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 const app = express();
 const PORT = 3000;
+
+async function startServer() {
 
 app.use(express.json());
 
@@ -313,7 +316,7 @@ const syncNews = async () => {
               model: "gemini-3-flash-preview",
               contents: [{ role: "user", parts: [{ text: prompt }] }],
               config: { responseMimeType: "application/json" }
-            });
+            }, 3, true);
             
             const aiData = extractJson(aiResult.text || "{}");
 
@@ -572,7 +575,7 @@ app.post("/api/news/archive", async (req, res) => {
         model: "gemini-3-flash-preview",
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         config: { responseMimeType: "application/json" }
-      });
+      }, 3, true);
       
       analysis = extractJson(aiResult.text || "{}");
       if (analysis && analysis.summary) summary = analysis.summary;
@@ -652,7 +655,7 @@ app.post("/api/news/analyze", rateLimiter, async (req, res) => {
       model: "gemini-3-flash-preview",
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       config: { responseMimeType: "application/json" }
-    });
+    }, 2, false);
 
     const aiData = extractJson(aiResult.text || "{}");
     if (!aiData) throw new Error("Oracle failed to generate valid intelligence analysis.");
@@ -716,7 +719,7 @@ app.post("/api/community/summarize", rateLimiter, async (req, res) => {
     const aiResult = await safeGenerateContent({
       model: "gemini-3-flash-preview",
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-    });
+    }, 2, false);
 
     res.json({ summary: aiResult.text });
   } catch (error: any) {
@@ -756,7 +759,7 @@ app.get("/api/daily-quote", async (req, res) => {
         config: {
           systemInstruction: "You are the Imperial Oracle Quote Generator."
         }
-      });
+      }, 1, false);
 
       const quoteText = result.text || "Success is the result of preparation, hard work, and learning from failure. | Colin Powell";
       cachedQuote = { text: quoteText, date: today };
@@ -782,7 +785,7 @@ app.post("/api/oracle/chat", rateLimiter, async (req, res) => {
       config: {
         systemInstruction: systemInstruction
       }
-    });
+    }, 2, false);
     res.json({ text: result.text });
   } catch (error: any) {
     console.error("Oracle Proxy Error:", error);
@@ -790,83 +793,86 @@ app.post("/api/oracle/chat", rateLimiter, async (req, res) => {
   }
 });
 
-// Vite middleware for development
-if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
-  const { createServer: createViteServer } = await import("vite");
-  const vite = await createViteServer({
-    server: { middlewareMode: true },
-    appType: "spa",
-  });
-  app.use(vite.middlewares);
-} else {
-  const distPath = path.join(process.cwd(), "dist");
-  // Only serve static files if the directory exists (prevents errors on Vercel serverless functions)
-  app.use(express.static(distPath));
-  app.get("*", (req, res) => {
-    const indexPath = path.join(distPath, "index.html");
-    res.sendFile(indexPath, (err) => {
-      if (err) {
-        // Fallback for Vercel where static files are served by the platform
-        res.status(404).send("Static file not found. Vercel should handle this via rewrites.");
+  // Vite middleware for development
+  if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
+    const { createServer: createViteServer } = await import("vite");
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), "dist");
+    // Only serve static files if the directory exists (prevents errors on Vercel serverless functions)
+    app.use(express.static(distPath));
+    app.get("*", (req, res) => {
+      const indexPath = path.join(distPath, "index.html");
+      res.sendFile(indexPath, (err) => {
+        if (err) {
+          // Fallback for Vercel where static files are served by the platform
+          res.status(404).send("Static file not found. Vercel should handle this via rewrites.");
+        }
+      });
+    });
+  }
+
+  if (!process.env.VERCEL) {
+    // Automated News Sync (Every 6 hours)
+    const SYNC_INTERVAL = 6 * 60 * 60 * 1000;
+    setInterval(async () => {
+      console.log("Automated News Engine reconnaissance initiated...");
+      try {
+        await syncNews();
+        console.log("Automated news sync completed successfully.");
+      } catch (err) {
+        console.error("Automated news sync failed:", err);
+      }
+    }, SYNC_INTERVAL);
+
+    app.listen(PORT, "0.0.0.0", async () => {
+      console.log(`[Imperial Server] Listening on http://0.0.0.0:${PORT}`);
+      console.log(`[Imperial Server] Environment: ${process.env.NODE_ENV}`);
+      
+      // Auto-Pilot Mode: Trigger Sync at 08:00 AM IST and 08:00 PM IST
+      setInterval(() => {
+          const now = new Date();
+          const istOffset = 5.5 * 60 * 60 * 1000;
+          const istTime = new Date(now.getTime() + istOffset);
+          const hours = istTime.getUTCHours();
+          const minutes = istTime.getUTCMinutes();
+
+          // 08:00 and 20:00 IST
+          if ((hours === 8 || hours === 20) && minutes === 0) {
+              console.log(`[Auto-Pilot] Triggering scheduled News Sync at ${hours}:00 IST`);
+              syncNews().catch(err => console.error("Auto-Pilot sync failed:", err));
+          }
+      }, 60000); // Check every minute
+      
+      const client = getSupabase();
+      if (client) {
+        try {
+          console.log("[Imperial Server] Auditing News Archives...");
+          
+          const { data } = await client.from('daily_news').select('id').limit(1);
+          const supabaseEmpty = !data || data.length === 0;
+          
+          if (supabaseEmpty) {
+            console.log("[Imperial Server] News archives empty or incomplete. Initiating background reconnaissance...");
+            syncNews().catch(err => console.error("Initial background sync failed:", err));
+          } else {
+            console.log("[Imperial Server] News archives found. Ready for duty.");
+          }
+        } catch (err) {
+          // High level warning instead of hard crash
+          console.warn("[Imperial Server] Initial news reconnaissance check bypassed.");
+        }
+      } else {
+        console.warn("[Imperial Server] Database not initialized. Some features may be offline.");
       }
     });
-  });
-}
-
-if (!process.env.VERCEL) {
-  // Automated News Sync (Every 6 hours)
-const SYNC_INTERVAL = 6 * 60 * 60 * 1000;
-setInterval(async () => {
-  console.log("Automated News Engine reconnaissance initiated...");
-  try {
-    await syncNews();
-    console.log("Automated news sync completed successfully.");
-  } catch (err) {
-    console.error("Automated news sync failed:", err);
   }
-}, SYNC_INTERVAL);
-
-app.listen(PORT, "0.0.0.0", async () => {
-    console.log(`[Imperial Server] Listening on http://0.0.0.0:${PORT}`);
-    console.log(`[Imperial Server] Environment: ${process.env.NODE_ENV}`);
-    
-    // Auto-Pilot Mode: Trigger Sync at 08:00 AM IST and 08:00 PM IST
-    setInterval(() => {
-        const now = new Date();
-        const istOffset = 5.5 * 60 * 60 * 1000;
-        const istTime = new Date(now.getTime() + istOffset);
-        const hours = istTime.getUTCHours();
-        const minutes = istTime.getUTCMinutes();
-
-        // 08:00 and 20:00 IST
-        if ((hours === 8 || hours === 20) && minutes === 0) {
-            console.log(`[Auto-Pilot] Triggering scheduled News Sync at ${hours}:00 IST`);
-            syncNews().catch(err => console.error("Auto-Pilot sync failed:", err));
-        }
-    }, 60000); // Check every minute
-    
-    const client = getSupabase();
-    if (client) {
-      try {
-        console.log("[Imperial Server] Auditing News Archives...");
-        
-        const { data } = await client.from('daily_news').select('id').limit(1);
-        const supabaseEmpty = !data || data.length === 0;
-        
-        if (supabaseEmpty) {
-          console.log("[Imperial Server] News archives empty or incomplete. Initiating background reconnaissance...");
-          syncNews().catch(err => console.error("Initial background sync failed:", err));
-        } else {
-          console.log("[Imperial Server] News archives found. Ready for duty.");
-        }
-      } catch (err) {
-        // High level warning instead of hard crash
-        console.warn("[Imperial Server] Initial news reconnaissance check bypassed.");
-      }
-    } else {
-      console.warn("[Imperial Server] Database not initialized. Some features may be offline.");
-    }
-  });
 }
+
+startServer().catch(console.error);
 
 export default app;
