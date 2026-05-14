@@ -170,11 +170,11 @@ export function PersonalVault({ user }: PersonalVaultProps) {
       if (insertError) throw insertError;
 
       setIsUploading(false);
-      alert("Saved to Vault: Your scholarly resource has been archived.");
+      alert("Saved to Vault");
     } catch (error: any) {
       setIsUploading(false);
       console.error('Upload Error:', error);
-      alert(`Scholarly Upload Failed: ${error.message}`);
+      alert(`Vault Access Error: ${error.message}`);
     } finally {
       if (e.target) e.target.value = '';
     }
@@ -233,7 +233,7 @@ export function PersonalVault({ user }: PersonalVaultProps) {
       if (error) throw error;
       
       setIsLoading(false);
-      alert("Saved to Vault: Your scholarly resource has been archived.");
+      alert("Saved to Vault");
       setIsAddingItem(false);
       setNewItem({ title: '', type: 'link', url: '', content: '' });
     } catch (error: any) {
@@ -241,7 +241,7 @@ export function PersonalVault({ user }: PersonalVaultProps) {
       console.error("Error adding item:", error);
       alert(`Vault Access Error: ${error.message}`);
     } finally {
-      // Final state handles by individual try/catch resets
+      // Final state handled by try/catch resets
     }
   };
 
@@ -554,7 +554,7 @@ export function PersonalVault({ user }: PersonalVaultProps) {
               <div className="flex gap-3 mt-10">
                 <Button onClick={() => setIsAddingItem(false)} variant="ghost" className="flex-1">Cancel</Button>
                 <Button onClick={handleAddItem} className="flex-1 bg-[#8B4513] text-white" disabled={isLoading}>
-                  {isLoading ? 'Sealing...' : 'Add to Vault'}
+                  {isLoading ? 'Sealing...' : 'Add Meta'}
                 </Button>
               </div>
             </motion.div>

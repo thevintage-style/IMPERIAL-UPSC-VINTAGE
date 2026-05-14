@@ -98,17 +98,36 @@ const genAI = new GoogleGenAI({
 });
 
 // Advanced Error Handling for Gemini API
-const safeGenerateContent = async (options: { model: string, contents: any[], config?: any }, retries = 5): Promise<any> => {
+// Global pacing for Gemini API to stay within 15 RPM free tier limits
+let lastGeminiCall = 0;
+const MIN_GAP = 5000; // 5 seconds minimum between any two calls (12 RPM)
+
+const safeGenerateContent = async (options: { model: string, contents: any[], config?: any }, retries = 7): Promise<any> => {
+  // Global pacing check
+  const now = Date.now();
+  const gapSinceLast = now - lastGeminiCall;
+  if (gapSinceLast < MIN_GAP) {
+    await new Promise(resolve => setTimeout(resolve, MIN_GAP - gapSinceLast + Math.random() * 1000));
+  }
+  lastGeminiCall = Date.now();
+
   try {
     return await genAI.models.generateContent(options);
   } catch (err: any) {
-    const errorMsg = err.message || JSON.stringify(err);
+    const errorMsg = (err.message || JSON.stringify(err)).toLowerCase();
     
-    // Handle Rate Limits (429)
-    if (errorMsg.includes("429") || errorMsg.includes("Quota exceeded") || errorMsg.includes("RESOURCE_EXHAUSTED")) {
+    // Handle Rate Limits (429, Resource Exhausted, Quota)
+    if (errorMsg.includes("429") || errorMsg.includes("quota") || errorMsg.includes("exhausted")) {
       if (retries > 0) {
-        const waitTime = (6 - retries) * 15000; // Backoff: 15s, 30s, 45s, 60s, 75s
-        console.warn(`[Imperial Oracle] Quota exceeded. Waiting ${waitTime/1000}s before retry... (${retries} left)`);
+        // Exponential backoff: 
+        // retries=7 -> gap=1
+        // retries=6 -> gap=2
+        // retries=1 -> gap=64
+        // waitTime: (2 ^ (8-retries)) * 5000ms + jitter
+        const backoffStep = 8 - retries;
+        const waitTime = (Math.pow(2, backoffStep) * 5000) + (Math.random() * 10000); 
+        
+        console.warn(`[Imperial Oracle] Quota exceeded. Waiting ${Math.round(waitTime/1000)}s before retry... (${retries} left)`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
         return safeGenerateContent(options, retries - 1);
       }
@@ -240,8 +259,8 @@ const syncNews = async () => {
             }
 
             // Pacing: Artificial delay to avoid Gemini rate limits (15 RPM free tier)
-            // Increased to 10s (6 RPM) for extreme safety during background sync
-            await sleep(10000); 
+            // Increased to 15s (4 RPM) for maximum safety during background sync
+            await sleep(15000); 
 
             // Scoring with Gemini
             const prompt = `
