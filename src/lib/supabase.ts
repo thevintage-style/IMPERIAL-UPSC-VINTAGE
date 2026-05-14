@@ -45,6 +45,18 @@ export const signUpWithEmail = async (email: string, password: string) => {
 };
 
 export const signOut = async () => {
-  await supabase.auth.signOut();
-  window.location.href = '/';
+  try {
+    // Attempt official sign out
+    await supabase.auth.signOut();
+  } catch (err) {
+    // Silent catch as requested - do not alert user
+    console.warn("Imperial Archives: Official sign out failed, proceeding with Hard Reset.", err);
+  } finally {
+    // The Hard Reset: Clear all local states regardless of success
+    localStorage.clear();
+    sessionStorage.clear();
+    
+    // Force redirect to landing page
+    window.location.href = '/';
+  }
 };

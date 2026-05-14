@@ -71,6 +71,7 @@ export function PersonalVault({ user }: PersonalVaultProps) {
   const [confirmDelete, setConfirmDelete] = useState<{id: string, type: 'item' | 'folder'} | null>(null);
 
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const userId = user.id;
 
   // Real-time Folders
@@ -144,13 +145,19 @@ export function PersonalVault({ user }: PersonalVaultProps) {
     }
 
     setIsUploading(true);
+    setUploadProgress(0);
     try {
-      const fileName = `${Date.now()}-${file.name}`;
-      const filePath = `${userId}/${fileName}`;
+      const fileName = `${Date.now()}_${file.name}`;
+      const filePath = `vault/${fileName}`;
       
       const { error: uploadError } = await supabase.storage
         .from('imperial-resources')
-        .upload(filePath, file);
+        .upload(filePath, file, {
+          onUploadProgress: (progress) => {
+            const percent = (progress.loaded / progress.total) * 100;
+            setUploadProgress(Math.round(percent));
+          }
+        });
 
       if (uploadError) throw uploadError;
 
@@ -169,9 +176,11 @@ export function PersonalVault({ user }: PersonalVaultProps) {
 
       if (insertError) throw insertError;
 
+      setUploadProgress(null);
       setIsUploading(false);
       alert("Saved to Vault");
     } catch (error: any) {
+      setUploadProgress(null);
       setIsUploading(false);
       console.error('Upload Error:', error);
       alert(`Vault Access Error: ${error.message}`);
@@ -453,7 +462,16 @@ export function PersonalVault({ user }: PersonalVaultProps) {
                 ))}
               </div>
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 relative">
+              {uploadProgress !== null && (
+                <div className="absolute -top-6 left-0 right-0 h-1 bg-[#8B4513]/10 rounded-full overflow-hidden">
+                  <motion.div 
+                    initial={{ width: 0 }}
+                    animate={{ width: `${uploadProgress}%` }}
+                    className="h-full bg-[#D4AF37]"
+                  />
+                </div>
+              )}
               <label className="bg-[#8B4513]/5 hover:bg-[#8B4513]/10 text-[#8B4513] rounded-xl flex items-center gap-2 px-6 py-2 cursor-pointer transition-all">
                 <Upload size={18} />
                 <span className="font-bold text-sm">{isUploading ? 'Sealing...' : 'Upload File'}</span>
