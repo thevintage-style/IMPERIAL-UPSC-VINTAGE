@@ -3,7 +3,7 @@ import { User as SupabaseUser } from '@supabase/supabase-js';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { Search, Navigation, Info, Sparkles, MapPin, Compass, Layers, Wind, Droplets, Mountain, Save, Edit3, Loader2 } from 'lucide-react';
+import { Search, Navigation, Info, Sparkles, MapPin, Compass, Layers, Wind, Droplets, Mountain, Save, Edit3, Loader2, ArrowLeft, X } from 'lucide-react';
 import { Button } from './ui/button';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from '../lib/supabase';
@@ -139,17 +139,42 @@ function MapUpdater({ center, onMapClick }: { center: [number, number], onMapCli
 
 export function Cartographer({ user }: CartographerProps) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [mapType, setMapType] = useState<'political' | 'physical' | 'indian'>('political');
+  const [overlays, setOverlays] = useState({ rivers: false, plains: false, plateaus: false });
+  const [locations, setLocations] = useState<any[]>([]);
+  const [selectedPoint, setSelectedPoint] = useState<any | null>(null);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [center, setCenter] = useState<[number, number]>([20.5937, 78.9629]);
   const [analysis, setAnalysis] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [activeLayer, setActiveLayer] = useState<'political' | 'physical' | 'rivers' | 'plateaus'>('political');
-  const [selectedPoint, setSelectedPoint] = useState<{lat: number, lon: number, name?: string} | null>(null);
   const [savedMarkers, setSavedMarkers] = useState<CustomMarker[]>([]);
   const [annotation, setAnnotation] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
 
   const userId = user.id;
+
+  // Load locations from Supabase map_locations table
+  useEffect(() => {
+    const fetchLocations = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('map_locations')
+          .select('*');
+        
+        if (!error && data) {
+          setLocations(data);
+        } else {
+          // Fallback to hardcoded if table doesn't exist or is empty
+          setLocations(STRATEGIC_POINTS);
+        }
+      } catch (err) {
+        console.error("Error fetching map locations:", err);
+        setLocations(STRATEGIC_POINTS);
+      }
+    };
+    fetchLocations();
+  }, []);
 
   // Load saved markers from Supabase
   useEffect(() => {
@@ -281,26 +306,58 @@ export function Cartographer({ user }: CartographerProps) {
   return (
     <div className="h-full flex flex-col gap-6">
       {/* Map Suite Sub-Nav */}
-      <div className="flex bg-white border-2 border-saddle-brown/10 rounded-2xl p-1 self-start shadow-sm">
-        {[
-          { id: 'political', label: 'Political', icon: Layers },
-          { id: 'physical', label: 'Physical', icon: Mountain },
-          { id: 'rivers', label: 'River Systems', icon: Droplets },
-          { id: 'plateaus', label: 'Plateaus', icon: Wind },
-        ].map((layer) => (
-          <button
-            key={layer.id}
-            onClick={() => setActiveLayer(layer.id as any)}
-            className={`px-6 py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition-all flex items-center gap-2 ${
-              activeLayer === layer.id 
-                ? 'bg-saddle-brown text-parchment shadow-md' 
-                : 'text-saddle-brown/40 hover:text-saddle-brown'
-            }`}
-          >
-            <layer.icon size={14} />
-            {layer.label}
-          </button>
-        ))}
+      <div className="flex flex-wrap gap-4 items-center justify-between">
+        <div className="flex bg-white border-2 border-saddle-brown/10 rounded-2xl p-1 shadow-sm">
+          {[
+            { id: 'political', label: 'Political Map', icon: Layers },
+            { id: 'physical', label: 'Physical Map', icon: Mountain },
+            { id: 'indian', label: 'Indian Map', icon: Compass },
+          ].map((type) => (
+            <button
+              key={type.id}
+              onClick={() => {
+                setMapType(type.id as any);
+                if (type.id === 'indian') {
+                  setCenter([22.9734, 78.6569]); // Center of India
+                }
+              }}
+              className={`px-6 py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition-all flex items-center gap-2 ${
+                mapType === type.id 
+                  ? 'bg-saddle-brown text-parchment shadow-md' 
+                  : 'text-saddle-brown/40 hover:text-saddle-brown'
+              }`}
+            >
+              <type.icon size={14} />
+              {type.label}
+            </button>
+          ))}
+        </div>
+
+        {mapType === 'political' && (
+          <div className="flex bg-antique-gold/10 border-2 border-antique-gold/20 rounded-2xl p-1 shadow-sm">
+             <span className="px-3 py-2 text-[10px] font-bold text-saddle-brown/60 uppercase flex items-center gap-1 border-r border-antique-gold/20 mr-1">
+               <Layers size={12} /> Overlays
+             </span>
+             {[
+              { id: 'rivers', label: 'Rivers', icon: Droplets },
+              { id: 'plains', label: 'Plains', icon: Wind },
+              { id: 'plateaus', label: 'Plateaus', icon: Mountain },
+            ].map((overlay) => (
+              <button
+                key={overlay.id}
+                onClick={() => setOverlays(prev => ({ ...prev, [overlay.id]: !prev[overlay.id as keyof typeof prev] }))}
+                className={`px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all flex items-center gap-2 ${
+                  overlays[overlay.id as keyof typeof overlays]
+                    ? 'bg-antique-gold text-leather shadow-sm' 
+                    : 'text-saddle-brown/40 hover:text-saddle-brown'
+                }`}
+              >
+                <overlay.icon size={12} />
+                {overlay.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="flex flex-col md:flex-row gap-4">
@@ -325,21 +382,124 @@ export function Cartographer({ user }: CartographerProps) {
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 flex-1 min-h-0">
         <div className="lg:col-span-3 bg-[#F5F2E7] rounded-3xl border-2 border-[#8B4513]/30 shadow-sm overflow-hidden relative scholar-map-container">
-          <MapContainer center={center} zoom={5} style={{ height: '100%', width: '100%', background: '#F5F2E7', filter: 'sepia(0.3) contrast(1.1) brightness(0.95)' }} {...({ center, zoom: 5 } as any)}>
-            <TileLayer
-              url={
-                activeLayer === 'physical' 
-                  ? "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png"
-                  : activeLayer === 'political'
-                    ? "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                    : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png"
-              }
-              {...({ attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>' } as any)}
-            />
-            
-            {/* River Systems Animation Layer (Conceptual SVG Overlay) */}
-            {activeLayer === 'rivers' && (
-              <div className="absolute inset-0 z-[1000] pointer-events-none opacity-60 mix-blend-multiply">
+          {(MapContainer as any) && (
+            <MapContainer 
+              center={center} 
+              zoom={5} 
+              style={{ height: '100%', width: '100%', background: '#F5F2E7' } as any}
+              {...({ center, zoom: 5 } as any)}
+            >
+              <TileLayer
+                url={
+                  mapType === 'physical' 
+                    ? "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png"
+                    : "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                }
+                {...({ attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' } as any)}
+              />
+              
+              <MapUpdater center={mapType === 'indian' ? [22.9734, 78.6569] : center} onMapClick={(lat, lon) => {
+                setCenter([lat, lon]);
+                setSelectedPoint({ lat, lon, name: "Surveyed Point" });
+                setAnnotation('');
+                analyzeStrategicSignificance(lat, lon);
+                setIsSidebarOpen(true);
+              }} />
+              {locations.map((point: any, idx: number) => (
+                <Marker 
+                  key={`loc-${idx}`} 
+                  position={point.coords as [number, number]}
+                  {...({ icon: VintageIcon } as any)}
+                  eventHandlers={{
+                    click: () => {
+                      setCenter(point.coords as [number, number]);
+                      setSelectedPoint(point);
+                      setIsSidebarOpen(true);
+                      analyzeStrategicSignificance(point.coords[0], point.coords[1], point.name);
+                    },
+                  }}
+                >
+                  <Popup>
+                    <div className="vintage-popup rounded-2xl font-serif p-2 min-w-[200px] text-leather">
+                      <h4 className="font-bold text-saddle-brown mb-1">{point.name}</h4>
+                      <p className="text-[10px] italic opacity-70 mb-2">{point.info || point.history}</p>
+                      <Button 
+                        size="sm" 
+                        className="w-full bg-antique-gold/20 text-saddle-brown border border-antique-gold/30 text-[10px] font-bold uppercase rounded-lg hover:bg-antique-gold/30"
+                        onClick={() => {
+                          setSelectedPoint(point);
+                          setIsSidebarOpen(true);
+                          analyzeStrategicSignificance(point.coords[0], point.coords[1], point.name, true);
+                        }}
+                      >
+                        Consult Oracle AI
+                      </Button>
+                    </div>
+                  </Popup>
+                </Marker>
+              ))}
+              {/* Saved Custom Markers */}
+              {savedMarkers.map((marker) => (
+                <Marker 
+                  key={`saved-${marker.id}`} 
+                  position={[marker.lat, marker.lon]} 
+                  {...({ icon: SavedMarkerIcon } as any)}
+                  eventHandlers={{
+                    click: () => {
+                      setSelectedPoint({ lat: marker.lat, lon: marker.lon, name: marker.name });
+                      setAnnotation(marker.annotation || '');
+                      setAnalysis(marker.analysis || '');
+                    }
+                  }}
+                >
+                  <Popup>
+                    <div className="font-serif p-2 min-w-[240px] bg-parchment border-2 border-saddle-brown/20 rounded-xl shadow-xl text-leather">
+                      <h4 className="font-bold text-sm border-b border-saddle-brown/10 pb-2 mb-2">Archived Strategic Point</h4>
+                      <p className="text-xs font-bold text-saddle-brown mb-1">{marker.name}</p>
+                      <p className="text-[10px] opacity-60 mb-2 truncate">{marker.annotation}</p>
+                      <button 
+                        onClick={() => {
+                          setSelectedPoint({ lat: marker.lat, lon: marker.lon, name: marker.name });
+                          setAnnotation(marker.annotation || '');
+                          setAnalysis(marker.analysis || '');
+                        }}
+                        className="w-full py-2 bg-antique-gold/20 text-saddle-brown text-[10px] font-bold uppercase rounded-lg"
+                      >
+                        Retrieve Data
+                      </button>
+                    </div>
+                  </Popup>
+                </Marker>
+              ))}
+
+              {selectedPoint && !locations.some(p => p.coords[0] === selectedPoint.lat && p.coords[1] === selectedPoint.lon) && !savedMarkers.some(m => m.lat === selectedPoint.lat && m.lon === selectedPoint.lon) && (
+                <Marker position={[selectedPoint.lat, selectedPoint.lon]} {...({ icon: SelectedIcon } as any)}>
+                  <Popup>
+                    <div className="font-serif p-2 min-w-[240px] bg-parchment border-2 border-saddle-brown/20 rounded-xl shadow-xl">
+                      <h4 className="font-bold text-leather text-sm border-b border-saddle-brown/10 pb-2 mb-2">Custom Strategic Point</h4>
+                      <p className="text-[10px] text-leather/60 mb-3">Coordinates: {selectedPoint.lat.toFixed(4)}, {selectedPoint.lon.toFixed(4)}</p>
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          analyzeStrategicSignificance(selectedPoint.lat, selectedPoint.lon, undefined, true);
+                        }}
+                        className="w-full py-2.5 bg-saddle-brown text-parchment text-[10px] font-bold uppercase tracking-widest rounded-xl hover:bg-leather transition-all flex items-center justify-center gap-2 shadow-md hover:shadow-lg active:scale-95"
+                      >
+                        <Sparkles size={12} className="text-antique-gold" />
+                        Deep AI Analysis
+                      </button>
+                    </div>
+                  </Popup>
+                </Marker>
+              )}
+            </MapContainer>
+          )}
+
+
+          {/* Geographical Overlays (Moved outside MapContainer context to avoid hydration/render errors) */}
+          <div className="absolute inset-0 z-[400] pointer-events-none overflow-hidden">
+            {overlays.rivers && (
+              <div className="absolute inset-0 opacity-60 mix-blend-multiply">
                 <svg width="100%" height="100%" viewBox="0 0 1000 1000" className="w-full h-full">
                   {/* Indus */}
                   <motion.path 
@@ -371,157 +531,31 @@ export function Cartographer({ user }: CartographerProps) {
                     animate={{ pathLength: 1 }}
                     transition={{ duration: 3.5, repeat: Infinity, delay: 2 }}
                   />
-                  {/* Narmada */}
-                  <motion.path 
-                    d="M450,550 L300,580" 
-                    stroke="#229ED9" 
-                    strokeWidth="3" 
-                    fill="none"
-                    initial={{ pathLength: 0 }}
-                    animate={{ pathLength: 1 }}
-                    transition={{ duration: 2, repeat: Infinity, delay: 0.5 }}
-                  />
-                  {/* Godavari */}
-                  <motion.path 
-                    d="M350,650 Q500,700 700,750" 
-                    stroke="#229ED9" 
-                    strokeWidth="4" 
-                    fill="none"
-                    initial={{ pathLength: 0 }}
-                    animate={{ pathLength: 1 }}
-                    transition={{ duration: 5, repeat: Infinity, delay: 1.5 }}
-                  />
                 </svg>
               </div>
             )}
 
-            {/* Plateau Formation Animation */}
-            {activeLayer === 'plateaus' && (
-              <div className="absolute inset-0 z-[1000] pointer-events-none flex items-center justify-center">
+            {overlays.plains && (
+              <div className="absolute inset-0 opacity-20">
                 <motion.div 
-                  initial={{ scale: 0.8, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 0.3 }}
-                  className="w-[500px] h-[500px] bg-[#8B4513] rounded-full blur-[120px] absolute top-[40%] left-[30%]"
-                />
-                <motion.div 
-                  initial={{ scale: 0.8, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 0.2 }}
-                  className="w-[300px] h-[300px] bg-[#D4AF37] rounded-full blur-[80px] absolute top-[20%] left-[60%]"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 0.3 }}
+                  className="absolute top-[25%] left-[35%] w-[40%] h-[15%] bg-green-500 rounded-full blur-[60px]"
                 />
               </div>
             )}
-            <MapUpdater center={center} onMapClick={(lat, lon) => {
-              setCenter([lat, lon]);
-              setSelectedPoint({ lat, lon });
-              setAnnotation('');
-              analyzeStrategicSignificance(lat, lon);
-            }} />
-            {STRATEGIC_POINTS.map((point, idx) => (
-              <Marker 
-                key={idx} 
-                position={point.coords as [number, number]}
-                {...({ title: `${point.name}\n${point.info}\n${point.upsc}` } as any)}
-                eventHandlers={{
-                  click: () => {
-                    setCenter(point.coords as [number, number]);
-                    setSelectedPoint({ lat: point.coords[0], lon: point.coords[1], name: point.name });
-                    setAnnotation('');
-                    analyzeStrategicSignificance(point.coords[0], point.coords[1], point.name);
-                  },
-                }}
-              >
-                <Popup>
-                  <div className="font-serif p-2 min-w-[240px] bg-parchment border-2 border-saddle-brown/20 rounded-xl shadow-xl">
-                    <div className="flex items-center justify-between mb-2 border-b border-saddle-brown/10 pb-2">
-                      <h4 className="font-bold text-leather text-sm">{point.name}</h4>
-                      <div className="px-2 py-0.5 bg-antique-gold/20 text-saddle-brown text-[8px] font-bold rounded-full uppercase tracking-tighter">
-                        {point.type}
-                      </div>
-                    </div>
-                    
-                    <p className="text-[11px] text-leather/80 mb-3 leading-relaxed italic">
-                      {point.info}
-                    </p>
 
-                    <div className="bg-saddle-brown/5 p-3 rounded-lg border border-saddle-brown/10 mb-4">
-                      <div className="flex items-center gap-2 mb-1.5">
-                        <Info size={10} className="text-antique-gold" />
-                        <p className="text-[9px] font-bold text-saddle-brown uppercase tracking-widest">UPSC Relevance</p>
-                      </div>
-                      <p className="text-[10px] leading-relaxed text-leather/90">
-                        {point.upsc}
-                      </p>
-                    </div>
-                    
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        analyzeStrategicSignificance(point.coords[0], point.coords[1], point.name, true);
-                      }}
-                      className="w-full py-2.5 bg-saddle-brown text-parchment text-[10px] font-bold uppercase tracking-widest rounded-xl hover:bg-leather transition-all flex items-center justify-center gap-2 shadow-md hover:shadow-lg active:scale-95"
-                    >
-                      <Sparkles size={12} className="text-antique-gold" />
-                      Deep AI Analysis
-                    </button>
-                  </div>
-                </Popup>
-              </Marker>
-            ))}
-            {/* Saved Custom Markers */}
-            {savedMarkers.map((marker) => (
-              <Marker 
-                key={marker.id} 
-                position={[marker.lat, marker.lon]} 
-                {...({ icon: SavedMarkerIcon } as any)}
-                eventHandlers={{
-                  click: () => {
-                    setSelectedPoint({ lat: marker.lat, lon: marker.lon, name: marker.name });
-                    setAnnotation(marker.annotation || '');
-                    setAnalysis(marker.analysis || '');
-                  }
-                }}
-              >
-                <Popup>
-                  <div className="font-serif p-2 min-w-[240px] bg-parchment border-2 border-saddle-brown/20 rounded-xl shadow-xl text-leather">
-                    <h4 className="font-bold text-sm border-b border-saddle-brown/10 pb-2 mb-2">Archived Strategic Point</h4>
-                    <p className="text-xs font-bold text-saddle-brown mb-1">{marker.name}</p>
-                    <p className="text-[10px] opacity-60 mb-2 truncate">{marker.annotation}</p>
-                    <button 
-                      onClick={() => {
-                        setSelectedPoint({ lat: marker.lat, lon: marker.lon, name: marker.name });
-                        setAnnotation(marker.annotation || '');
-                        setAnalysis(marker.analysis || '');
-                      }}
-                      className="w-full py-2 bg-antique-gold/20 text-saddle-brown text-[10px] font-bold uppercase rounded-lg"
-                    >
-                      Retrieve Data
-                    </button>
-                  </div>
-                </Popup>
-              </Marker>
-            ))}
-
-            {selectedPoint && !STRATEGIC_POINTS.some(p => p.coords[0] === selectedPoint.lat && p.coords[1] === selectedPoint.lon) && !savedMarkers.some(m => m.lat === selectedPoint.lat && m.lon === selectedPoint.lon) && (
-              <Marker position={[selectedPoint.lat, selectedPoint.lon]} {...({ icon: SelectedIcon } as any)}>
-                <Popup>
-                  <div className="font-serif p-2 min-w-[240px] bg-parchment border-2 border-saddle-brown/20 rounded-xl shadow-xl">
-                    <h4 className="font-bold text-leather text-sm border-b border-saddle-brown/10 pb-2 mb-2">Custom Strategic Point</h4>
-                    <p className="text-[10px] text-leather/60 mb-3">Coordinates: {selectedPoint.lat.toFixed(4)}, {selectedPoint.lon.toFixed(4)}</p>
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        analyzeStrategicSignificance(selectedPoint.lat, selectedPoint.lon, undefined, true);
-                      }}
-                      className="w-full py-2.5 bg-saddle-brown text-parchment text-[10px] font-bold uppercase tracking-widest rounded-xl hover:bg-leather transition-all flex items-center justify-center gap-2 shadow-md hover:shadow-lg active:scale-95"
-                    >
-                      <Sparkles size={12} className="text-antique-gold" />
-                      Deep AI Analysis
-                    </button>
-                  </div>
-                </Popup>
-              </Marker>
+            {overlays.plateaus && (
+              <div className="absolute inset-0 opacity-20">
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 0.4 }}
+                  className="absolute top-[50%] left-[35%] w-[30%] h-[30%] bg-amber-800 rounded-full blur-[80px]"
+                />
+              </div>
             )}
-          </MapContainer>
+          </div>
+
           
           <div className="absolute bottom-6 right-6 z-[1000]">
             <Button 
@@ -535,78 +569,133 @@ export function Cartographer({ user }: CartographerProps) {
           </div>
         </div>
 
-        <div className="space-y-6 overflow-y-auto pr-2 custom-scrollbar">
-          {selectedPoint && (
-            <div className="bg-white p-6 rounded-3xl border-2 border-[#8B4513]/20 shadow-lg">
-              <h3 className="font-serif font-bold text-[#8B4513] mb-4 flex items-center gap-2">
-                <MapPin size={18} />
-                Selected Location
-              </h3>
-              <div className="space-y-4">
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-[#8B4513]/60 mb-1">Coordinates</p>
-                  <p className="text-sm font-serif">{selectedPoint.lat.toFixed(4)}, {selectedPoint.lon.toFixed(4)}</p>
-                </div>
-                
-                <div>
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-[#8B4513]/60 mb-1 block">Personal Annotation</label>
-                  <textarea 
-                    value={annotation}
-                    onChange={(e) => setAnnotation(e.target.value)}
-                    placeholder="Add your scholarly notes for this location..."
-                    className="w-full bg-[#F5F2E7]/50 border border-[#8B4513]/10 rounded-xl p-3 text-xs font-serif outline-none focus:border-[#D4AF37] resize-none h-24"
-                  />
+        <motion.div 
+          className="lg:col-span-1 flex flex-col gap-6"
+          initial={{ x: 20, opacity: 0 }}
+          animate={{ x: 0, opacity: 1 }}
+        >
+          <AnimatePresence>
+            {isSidebarOpen && selectedPoint && (
+              <motion.div 
+                initial={{ x: 50, opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                exit={{ x: 50, opacity: 0 }}
+                className="bg-white p-6 rounded-3xl border-2 border-saddle-brown/20 shadow-2xl scholarship-sidebar"
+              >
+                <div className="flex justify-between items-start mb-6">
+                  <div>
+                    <h3 className="font-serif font-bold text-saddle-brown text-2xl leading-none">{selectedPoint.name}</h3>
+                    <p className="text-[10px] font-bold text-antique-gold uppercase tracking-[0.2em] mt-1">Location Dossier</p>
+                  </div>
+                  <button onClick={() => setIsSidebarOpen(false)} className="p-2 hover:bg-saddle-brown/5 rounded-full">
+                    <ArrowLeft className="text-saddle-brown" size={20} />
+                  </button>
                 </div>
 
-                <Button 
-                  onClick={handleSaveToVault}
-                  disabled={isSaving}
-                  className={`w-full rounded-xl flex items-center justify-center gap-2 transition-all ${
-                    saveStatus === 'success' ? 'bg-green-600' : 'bg-[#8B4513] hover:bg-[#1A1612]'
-                  } text-[#F5F2E7]`}
-                >
-                  {isSaving ? <Loader2 size={16} className="animate-spin" /> : saveStatus === 'success' ? <Save size={16} /> : <Save size={16} />}
-                  {saveStatus === 'success' ? 'Saved to Vault' : saveStatus === 'error' ? 'Error Saving' : 'Save to Personal Vault'}
-                </Button>
-              </div>
-            </div>
-          )}
+                <div className="space-y-6">
+                  <div className="p-4 bg-parchment/50 border border-saddle-brown/10 rounded-2xl">
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-saddle-brown/60 mb-2 flex items-center gap-2">
+                       <MapPin size={12} className="text-antique-gold" /> Coordinates
+                    </h4>
+                    <p className="text-xs font-serif italic">{selectedPoint.coords ? selectedPoint.coords[0].toFixed(4) : selectedPoint.lat.toFixed(4)}, {selectedPoint.coords ? selectedPoint.coords[1].toFixed(4) : selectedPoint.lon.toFixed(4)}</p>
+                  </div>
 
-          <div className="bg-white p-6 rounded-3xl border border-[#5A5A40]/10 shadow-sm">
-            <h3 className="font-serif font-bold text-[#5A5A40] mb-4 flex items-center gap-2">
-              <Navigation size={18} />
+                  <div>
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-saddle-brown/60 mb-2 flex items-center gap-2">
+                       <Navigation size={12} className="text-antique-gold" /> Strategic Importance
+                    </h4>
+                    <p className="text-sm font-serif leading-relaxed text-leather">
+                      {selectedPoint.importance || selectedPoint.upsc || "Analyzing strategic geography through the Lens of UPSC Mains GS-I & GS-III."}
+                    </p>
+                  </div>
+
+                  <div>
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-saddle-brown/60 mb-2 flex items-center gap-2">
+                       <Compass size={12} className="text-antique-gold" /> Concise History
+                    </h4>
+                    <p className="text-xs font-serif leading-relaxed text-leather/80 italic">
+                      {selectedPoint.history || selectedPoint.info || "History is often shaped by mountains and rivers. This region stands at a crossroad of civilization."}
+                    </p>
+                  </div>
+
+                  <div className="pt-4 border-t border-saddle-brown/10 flex flex-col gap-3">
+                    <Button 
+                      onClick={() => analyzeStrategicSignificance(selectedPoint.lat || selectedPoint.coords[0], selectedPoint.lon || selectedPoint.coords[1], selectedPoint.name, true)}
+                      disabled={isAnalyzing}
+                      className="w-full bg-saddle-brown hover:bg-leather text-parchment rounded-xl py-6 flex items-center gap-3 relative overflow-hidden group"
+                    >
+                      <Sparkles size={20} className={isAnalyzing ? "animate-spin text-antique-gold" : "text-antique-gold group-hover:scale-125 transition-transform"} />
+                      <span className="font-bold tracking-widest text-[10px] uppercase">Consult Oracle AI</span>
+                      {isAnalyzing && (
+                         <motion.div 
+                          className="absolute inset-0 bg-antique-gold/10"
+                          animate={{ x: ['100%', '-100%'] }}
+                          transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}
+                         />
+                      )}
+                    </Button>
+
+                    <Button 
+                      variant="outline"
+                      onClick={handleSaveToVault}
+                      disabled={isSaving}
+                      className="w-full border-saddle-brown/20 text-saddle-brown rounded-xl hover:bg-parchment py-6 flex items-center gap-3"
+                    >
+                      <Save size={18} />
+                      <span className="font-bold tracking-widest text-[10px] uppercase">Archieve to Vault</span>
+                    </Button>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <div className="bg-white p-6 rounded-3xl border border-saddle-brown/10 shadow-sm grow min-h-0 flex flex-col overflow-hidden">
+            <h3 className="font-serif font-bold text-saddle-brown mb-4 flex items-center gap-2 shrink-0">
+              <Navigation size={18} className="text-antique-gold" />
               Strategic Points
             </h3>
-            <div className="space-y-3">
-              {STRATEGIC_POINTS.map((point, idx) => (
+            <div className="space-y-2 overflow-y-auto custom-scrollbar flex-1">
+              {locations.map((point: any, idx: number) => (
                 <button
                   key={idx}
-                  onClick={() => setCenter(point.coords as [number, number])}
-                  className="w-full text-left p-3 rounded-xl hover:bg-[#f5f2ed] transition-colors group"
+                  onClick={() => {
+                    setCenter(point.coords as [number, number]);
+                    setSelectedPoint(point);
+                    setIsSidebarOpen(true);
+                  }}
+                  className={`w-full text-left p-4 rounded-xl transition-all border ${
+                    selectedPoint?.name === point.name 
+                      ? 'bg-saddle-brown text-parchment border-saddle-brown shadow-md' 
+                      : 'bg-parchment/10 text-leather border-saddle-brown/5 hover:bg-parchment/50'
+                  }`}
                 >
-                  <p className="font-serif font-bold text-sm group-hover:text-[#5A5A40]">{point.name}</p>
-                  <p className="text-[10px] text-[#5A5A40]/60 uppercase tracking-tighter">Quick Jump</p>
+                  <p className="font-serif font-bold text-sm">{point.name}</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-[8px] uppercase tracking-widest opacity-60">Reconnaissance Active</span>
+                  </div>
                 </button>
               ))}
             </div>
           </div>
-
-          {analysis && (
-            <div className="bg-[#1A1612] text-[#F5F2E7] p-6 rounded-3xl shadow-xl border-2 border-[#D4AF37]/30">
-              <h3 className="font-serif font-bold mb-4 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Sparkles size={18} className="text-[#D4AF37]" />
-                  Strategic Insight
-                </div>
-                {isAnalyzing && <Loader2 size={14} className="animate-spin text-[#D4AF37]" />}
-              </h3>
-              <div className="text-[11px] font-serif leading-relaxed prose prose-invert prose-p:my-1 prose-headings:text-[#D4AF37] prose-headings:text-sm prose-headings:mt-3 prose-headings:mb-1 custom-scrollbar max-h-[400px] overflow-y-auto pr-2">
-                <ReactMarkdown>{analysis}</ReactMarkdown>
-              </div>
-            </div>
-          )}
-        </div>
+        </motion.div>
       </div>
+
+      {analysis && (
+        <div className="bg-[#1A1612] text-[#F5F2E7] p-6 rounded-3xl shadow-xl border-2 border-[#D4AF37]/30">
+          <h3 className="font-serif font-bold mb-4 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Sparkles size={18} className="text-[#D4AF37]" />
+              Strategic Insight
+            </div>
+            {isAnalyzing && <Loader2 size={14} className="animate-spin text-[#D4AF37]" />}
+          </h3>
+          <div className="text-[11px] font-serif leading-relaxed prose prose-invert prose-p:my-1 prose-headings:text-[#D4AF37] prose-headings:text-sm prose-headings:mt-3 prose-headings:mb-1 custom-scrollbar max-h-[400px] overflow-y-auto pr-2">
+            <ReactMarkdown>{analysis}</ReactMarkdown>
+          </div>
+        </div>
+      )}
+
       <style>{`
         .scholar-map-container .leaflet-tile-pane {
           filter: sepia(0.5) contrast(0.9) brightness(1.1) grayscale(0.2);

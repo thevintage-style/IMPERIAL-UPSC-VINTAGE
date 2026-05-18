@@ -363,7 +363,15 @@ export function PeerChat({ user }: PeerChatProps) {
               {messages.map(msg => {
                 const isOwn = msg.sender_id === user.id;
                 return (
-                  <div key={msg.id} className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
+                  <div key={msg.id} className={`flex flex-col ${isOwn ? 'items-end' : 'items-start'}`}>
+                    <div className={`flex items-center gap-2 mb-1 px-2`}>
+                      <span className="text-[10px] font-bold text-saddle-brown/60 uppercase tracking-widest">
+                        {isOwn ? 'Your Excellency' : selectedUser.display_name}
+                      </span>
+                      <span className="text-[8px] text-saddle-brown/40">
+                        {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
                     <div className={`max-w-[75%] p-4 rounded-3xl shadow-md border ${
                       isOwn 
                         ? 'bg-saddle-brown text-parchment border-saddle-brown/20 rounded-tr-none' 
@@ -386,9 +394,6 @@ export function PeerChat({ user }: PeerChatProps) {
                         </div>
                       )}
                       <p className="text-sm font-serif leading-relaxed">{msg.text}</p>
-                      <p className={`text-[8px] mt-2 opacity-40 text-right ${isOwn ? 'text-parchment/60' : 'text-leather/60'}`}>
-                        {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </p>
                     </div>
                   </div>
                 );

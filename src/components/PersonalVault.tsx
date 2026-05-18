@@ -29,7 +29,7 @@ import ReactMarkdown from 'react-markdown';
 interface VaultItem {
   id: string;
   title: string;
-  type: 'video' | 'pdf' | 'link' | 'note' | 'map_marker';
+  type: string;
   url?: string;
   content?: string;
   analysis?: {
@@ -137,16 +137,17 @@ export function PersonalVault({ user }: PersonalVaultProps) {
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !userId) return;
-
-    if (!isConfigured) {
-      alert("Imperial Archives Inaccessible: Supabase is not correctly configured.");
-      return;
-    }
+    if (!file) return;
 
     setIsUploading(true);
     setUploadProgress(0);
+    
     try {
+      if (!isConfigured) {
+        window.alert("Imperial Archives Inaccessible: Supabase is not correctly configured.");
+        return;
+      }
+
       const fileName = `${Date.now()}_${file.name}`;
       const filePath = `vault/${fileName}`;
       
@@ -160,26 +161,26 @@ export function PersonalVault({ user }: PersonalVaultProps) {
         .from('imperial-resources')
         .getPublicUrl(filePath);
 
-      const { error: insertError } = await supabase.from('personal_vault').insert({
+      // Construct exactly three parameters for the payload
+      const payload = {
         title: file.name,
-        type: file.type.includes('pdf') ? 'pdf' : file.type.includes('video') ? 'video' : 'pdf',
-        url: publicUrl,
-        user_id: userId,
-        folder_id: currentFolderId,
-        created_at: new Date().toISOString()
-      });
+        type: file.type.includes('pdf') ? 'PDF' : file.type.includes('video') ? 'Video' : 'PDF',
+        url: publicUrl
+      };
+
+      const { error: insertError } = await supabase.from('personal_vault').insert(payload);
 
       if (insertError) throw insertError;
 
-      setUploadProgress(null);
-      setIsUploading(false);
-      alert("Saved to Vault");
+      window.alert("Saved to Vault");
     } catch (error: any) {
-      setUploadProgress(null);
-      setIsUploading(false);
       console.error('Upload Error:', error);
-      alert(`Vault Access Error: ${error.message}`);
+      // Expose explicit database failure
+      window.alert(`Database Error: ${error.message || error}`);
     } finally {
+      // Kill button freezes, reset progress and upload state
+      setIsUploading(false);
+      setUploadProgress(null);
       if (e.target) e.target.value = '';
     }
   };
@@ -214,38 +215,43 @@ export function PersonalVault({ user }: PersonalVaultProps) {
   };
 
   const handleAddItem = async () => {
-    if (!newItem.title || !userId) return;
-
-    if (!isConfigured) {
-      alert("Imperial Archives Inaccessible: Supabase is not correctly configured.");
-      return;
-    }
+    if (!newItem.title) return;
 
     setIsLoading(true);
     try {
-      // Direct insertion into personal_vault as requested
-      const { error } = await supabase.from('personal_vault').insert({
+      if (!isConfigured) {
+        window.alert("Imperial Archives Inaccessible: Supabase is not correctly configured.");
+        return;
+      }
+
+      const typeMap: Record<string, string> = {
+        'link': 'Link',
+        'pdf': 'PDF',
+        'video': 'Video',
+        'note': 'Note'
+      };
+
+      // Construct exactly three parameters for the payload
+      const payload = {
         title: newItem.title,
-        type: newItem.type,
-        url: newItem.url || '', // This is the address
-        content: newItem.content || '',
-        user_id: userId,
-        folder_id: currentFolderId,
-        created_at: new Date().toISOString()
-      });
+        type: typeMap[newItem.type] || 'Link',
+        url: newItem.type === 'note' ? newItem.content : (newItem.url || '')
+      };
+
+      const { error } = await supabase.from('personal_vault').insert(payload);
       
       if (error) throw error;
       
-      setIsLoading(false);
-      alert("Saved to Vault");
+      window.alert("Saved to Vault");
       setIsAddingItem(false);
       setNewItem({ title: '', type: 'link', url: '', content: '' });
     } catch (error: any) {
-      setIsLoading(false);
       console.error("Error adding item:", error);
-      alert(`Vault Access Error: ${error.message}`);
+      // Expose explicit database failure
+      window.alert(`Database Error: ${error.message || error}`);
     } finally {
-      // Final state handled by try/catch resets
+      // Kill button freezes, explicitly unlock state
+      setIsLoading(false);
     }
   };
 
@@ -296,7 +302,7 @@ export function PersonalVault({ user }: PersonalVaultProps) {
 
   const filteredItems = items.filter(item => {
     const matchesFolder = item.folder_id === currentFolderId;
-    const matchesTab = activeTab === 'all' || item.type === activeTab;
+    const matchesTab = activeTab === 'all' || item.type.toLowerCase() === activeTab.toLowerCase();
     const matchesSearch = item.title.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesFolder && matchesTab && matchesSearch;
   });
@@ -500,11 +506,11 @@ export function PersonalVault({ user }: PersonalVaultProps) {
               {filteredItems.map(item => (
                 <motion.div key={item.id} whileHover={{ scale: 1.02 }} className="bg-white p-6 rounded-[32px] border-2 border-[#8B4513]/10 shadow-sm hover:shadow-xl transition-all group relative">
                   <div className="text-[#8B4513] mb-4">
-                    {item.type === 'video' && <Video size={40} />}
-                    {item.type === 'pdf' && <File size={40} />}
-                    {item.type === 'link' && <LinkIcon size={40} />}
-                    {item.type === 'note' && <FileText size={40} />}
-                    {item.type === 'map_marker' && <MapPin size={40} />}
+                    {item.type.toLowerCase() === 'video' && <Video size={40} />}
+                    {item.type.toLowerCase() === 'pdf' && <File size={40} />}
+                    {item.type.toLowerCase() === 'link' && <LinkIcon size={40} />}
+                    {item.type.toLowerCase() === 'note' && <FileText size={40} />}
+                    {item.type.toLowerCase() === 'map_marker' && <MapPin size={40} />}
                   </div>
                   <p className="font-serif font-bold text-[#1A1612] truncate mb-1">{item.title}</p>
                   <div className="flex items-center justify-between">
