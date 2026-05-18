@@ -143,6 +143,12 @@ export function PersonalVault({ user }: PersonalVaultProps) {
     setUploadProgress(0);
     
     try {
+      const { data: authData } = await supabase.auth.getUser();
+      if (!authData.user) {
+        window.alert("Please log in before saving items.");
+        return;
+      }
+
       if (!isConfigured) {
         window.alert("Imperial Archives Inaccessible: Supabase is not correctly configured.");
         return;
@@ -162,6 +168,7 @@ export function PersonalVault({ user }: PersonalVaultProps) {
         .getPublicUrl(filePath);
 
       // Construct exactly three parameters for the payload
+      // Relying on auth.uid() in DB for user_id
       const payload = {
         title: file.name,
         type: file.type.includes('pdf') ? 'PDF' : file.type.includes('video') ? 'Video' : 'PDF',
@@ -178,7 +185,7 @@ export function PersonalVault({ user }: PersonalVaultProps) {
       // Expose explicit database failure
       window.alert(`Database Error: ${error.message || error}`);
     } finally {
-      // Kill button freezes, reset progress and upload state
+      // Kill button freezes, explicitly force state to false
       setIsUploading(false);
       setUploadProgress(null);
       if (e.target) e.target.value = '';
@@ -219,6 +226,12 @@ export function PersonalVault({ user }: PersonalVaultProps) {
 
     setIsLoading(true);
     try {
+      const { data: authData } = await supabase.auth.getUser();
+      if (!authData.user) {
+        window.alert("Please log in before saving items.");
+        return;
+      }
+
       if (!isConfigured) {
         window.alert("Imperial Archives Inaccessible: Supabase is not correctly configured.");
         return;
@@ -232,6 +245,7 @@ export function PersonalVault({ user }: PersonalVaultProps) {
       };
 
       // Construct exactly three parameters for the payload
+      // Relying on auth.uid() in DB for user_id
       const payload = {
         title: newItem.title,
         type: typeMap[newItem.type] || 'Link',
@@ -250,7 +264,7 @@ export function PersonalVault({ user }: PersonalVaultProps) {
       // Expose explicit database failure
       window.alert(`Database Error: ${error.message || error}`);
     } finally {
-      // Kill button freezes, explicitly unlock state
+      // Kill button freezes, explicitly force state to false
       setIsLoading(false);
     }
   };

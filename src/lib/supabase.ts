@@ -49,7 +49,6 @@ export const signOut = async () => {
     // Attempt official sign out
     await supabase.auth.signOut();
   } catch (err) {
-    // Silent catch as requested - do not alert user
     console.warn("Imperial Archives: Official sign out failed, proceeding with Hard Reset.", err);
   } finally {
     // The Hard Reset: Clear all local states regardless of success
@@ -65,8 +64,5 @@ export const signOut = async () => {
 
     // Force redirect to landing page and refresh
     window.location.href = '/';
-    setTimeout(() => {
-      window.location.reload();
-    }, 100);
   }
 };

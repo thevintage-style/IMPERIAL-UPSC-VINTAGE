@@ -164,63 +164,63 @@ export default function App() {
           <h1 className="text-3xl font-serif font-bold text-[#1a1a1a] mb-2 tracking-tight italic">Imperial Scholar</h1>
           <p className="text-[#5A5A40] font-serif italic mb-8">Your world-class companion for the UPSC journey.</p>
           
-          <div className="auth-container">
-            <Auth
-              supabaseClient={supabase}
-              view="sign_up"
-              onlyThirdPartyProviders={false}
-              providers={[]}
-              magicLink={false}
-              showLinks={true}
-              appearance={{
-                theme: ThemeSupa,
-                variables: {
-                  default: {
-                    colors: {
-                      brand: '#5A5A40',
-                      brandAccent: '#8B4513',
-                      inputBackground: 'white',
-                      inputText: '#1a1a1a',
-                      inputBorder: '#5A5A4020',
-                      inputBorderFocus: '#5A5A40',
-                      inputBorderHover: '#5A5A4040',
-                    },
-                    radii: {
-                      borderRadiusButton: '12px',
-                      inputBorderRadius: '12px',
-                    },
-                  },
-                },
-                className: {
-                  container: 'font-serif text-left',
-                  button: 'font-bold tracking-widest uppercase transition-all shadow-md mt-4',
-                  input: 'bg-[#f5f2ed] border border-[#5A5A40]/10 focus:ring-2 focus:ring-[#5A5A40] rounded-xl py-3 px-4',
-                  label: 'font-bold uppercase tracking-widest text-[#5A5A40] text-[10px] mb-2 ml-1',
+          <div className="auth-container text-left space-y-6">
+            <h2 className="text-lg font-serif font-bold text-[#5A5A40] uppercase tracking-widest text-center mb-6">
+              {isSignUp ? "Register in Archives" : "Enter the Archives"}
+            </h2>
+            
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              const formData = new FormData(e.currentTarget);
+              const email = formData.get('email') as string;
+              const password = formData.get('password') as string;
+              
+              setLoading(true);
+              try {
+                if (isSignUp) {
+                  const { error } = await signUpWithEmail(email, password);
+                  if (error) throw error;
+                  window.alert("Imperial confirmation raven dispatched! Please check your email.");
+                } else {
+                  const { error } = await signInWithEmail(email, password);
+                  if (error) throw error;
                 }
-              }}
-              localization={{
-                variables: {
-                  sign_up: {
-                    email_label: "Sacred Email",
-                    password_label: "Imperial Cipher",
-                    button_label: "Register in Archives",
-                    loading_button_label: "Dispatching Raven...",
-                    social_provider_text: "Join via {{provider}}",
-                    link_text: "Don't have an account? Sign up",
-                    confirmation_text: "Imperial confirmation raven dispatched!",
-                  },
-                  sign_in: {
-                    email_label: "Known Email",
-                    password_label: "Imperial Cipher",
-                    button_label: "Enter the Archives",
-                    loading_button_label: "Verifying Lineage...",
-                    social_provider_text: "Sign in with {{provider}}",
-                    link_text: "Already have an account? Sign in",
-                  },
-                },
-              }}
-              redirectTo={window.location.origin}
-            />
+              } catch (error: any) {
+                console.error("Auth Error:", error);
+                window.alert("Authentication Failed: " + (error.message || error));
+              } finally {
+                setLoading(false);
+              }
+            }} className="space-y-4">
+              <div className="space-y-2">
+                <label className="font-bold uppercase tracking-widest text-[#5A5A40] text-[10px] ml-1">Sacred Email</label>
+                <input 
+                  required
+                  type="email" 
+                  name="email"
+                  placeholder="scholar@imperial.edu"
+                  className="w-full bg-[#f5f2ed] border border-[#5A5A40]/10 focus:ring-2 focus:ring-[#5A5A40] rounded-xl py-3 px-4 outline-none font-serif"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="font-bold uppercase tracking-widest text-[#5A5A40] text-[10px] ml-1">Imperial Cipher</label>
+                <input 
+                  required
+                  type="password" 
+                  name="password"
+                  placeholder="••••••••"
+                  className="w-full bg-[#f5f2ed] border border-[#5A5A40]/10 focus:ring-2 focus:ring-[#5A5A40] rounded-xl py-3 px-4 outline-none font-serif"
+                />
+              </div>
+              
+              <Button 
+                type="submit" 
+                disabled={loading}
+                className="w-full bg-[#5A5A40] hover:bg-[#8B4513] text-parchment font-bold tracking-widest uppercase py-6 rounded-xl shadow-md transition-all mt-4"
+              >
+                {loading ? "Verifying Lineage..." : (isSignUp ? "Register" : "Sign In")}
+              </Button>
+            </form>
           </div>
 
           <div className="mt-8 pt-6 border-t border-[#5A5A40]/10">

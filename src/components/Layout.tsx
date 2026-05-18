@@ -110,10 +110,11 @@ export function Layout({ user, profile, activeTab, setActiveTab, onEntrySelect, 
 
   const handleLogout = async () => {
     try {
-      await supabaseSignOut();
+      await supabase.auth.signOut();
     } catch (error) {
       console.error("Logout error:", error);
-      // Fallback in case the imported function fails
+    } finally {
+      // Force clear session no matter what instantly
       localStorage.clear();
       sessionStorage.clear();
       window.location.href = '/';

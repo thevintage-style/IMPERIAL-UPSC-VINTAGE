@@ -260,10 +260,17 @@ export function Cartographer({ user }: CartographerProps) {
   };
 
   const handleSaveToVault = async () => {
-    if (!userId || !selectedPoint) return;
+    if (!selectedPoint) return;
+    
     setIsSaving(true);
     setSaveStatus('saving');
     try {
+      const { data: authData } = await supabase.auth.getUser();
+      if (!authData.user) {
+        window.alert("Please log in before saving items.");
+        return;
+      }
+
       const markerName = selectedPoint.name || `Point ${selectedPoint.lat.toFixed(2)}, ${selectedPoint.lon.toFixed(2)}`;
       
       const markerData = {
@@ -272,7 +279,7 @@ export function Cartographer({ user }: CartographerProps) {
         lon: selectedPoint.lon,
         annotation: annotation,
         content: analysis || 'No analysis available.',
-        user_id: userId,
+        // Relying on auth.uid() in DB for user_id
         created_at: new Date().toISOString()
       };
 
@@ -295,9 +302,11 @@ export function Cartographer({ user }: CartographerProps) {
 
       setSaveStatus('success');
       setTimeout(() => setSaveStatus('idle'), 3000);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error saving to Imperial Vault:", error);
       setSaveStatus('error');
+      window.alert(`Database Error: ${error.message || error}`);
+      setTimeout(() => setSaveStatus('idle'), 3000);
     } finally {
       setIsSaving(false);
     }
@@ -638,11 +647,36 @@ export function Cartographer({ user }: CartographerProps) {
                     <Button 
                       variant="outline"
                       onClick={handleSaveToVault}
-                      disabled={isSaving}
-                      className="w-full border-saddle-brown/20 text-saddle-brown rounded-xl hover:bg-parchment py-6 flex items-center gap-3"
+                      disabled={isSaving || saveStatus === 'success'}
+                      className={`w-full rounded-xl py-6 flex items-center gap-3 transition-all ${
+                        saveStatus === 'success' 
+                          ? 'bg-green-50 border-green-500/30 text-green-700' 
+                          : saveStatus === 'error'
+                          ? 'bg-red-50 border-red-500/30 text-red-700'
+                          : 'border-saddle-brown/20 text-saddle-brown hover:bg-parchment'
+                      }`}
                     >
-                      <Save size={18} />
-                      <span className="font-bold tracking-widest text-[10px] uppercase">Archieve to Vault</span>
+                      {saveStatus === 'saving' ? (
+                        <>
+                          <Loader2 size={18} className="animate-spin" />
+                          <span className="font-bold tracking-widest text-[10px] uppercase text-leather/60">Sealing Archive...</span>
+                        </>
+                      ) : saveStatus === 'success' ? (
+                        <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="flex items-center justify-center gap-2 w-full">
+                           <Save size={18} className="text-green-600" />
+                           <span className="font-bold tracking-widest text-[10px] uppercase">Marker Archived Successfully</span>
+                        </motion.div>
+                      ) : saveStatus === 'error' ? (
+                        <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="flex items-center justify-center gap-2 w-full">
+                          <X size={18} className="text-red-600" />
+                          <span className="font-bold tracking-widest text-[10px] uppercase">Archival Failure</span>
+                        </motion.div>
+                      ) : (
+                        <>
+                          <Save size={18} />
+                          <span className="font-bold tracking-widest text-[10px] uppercase">Archive to Vault</span>
+                        </>
+                      )}
                     </Button>
                   </div>
                 </div>
